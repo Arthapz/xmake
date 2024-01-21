@@ -115,7 +115,7 @@ function _should_build(target, sourcefile, bmifile, objectfile, requires, opt)
             local m = get_from_target_mapper(target, required)
             if m then
                 local rebuild = m.headerunit and compiler_support.memcache():get2(target:name() .. m.headerunit.path, "compiling")
-                                             or  compiler_support.memcache():get2(target:name() .. m.sourcefile, "compiling")
+                                             or (m.sourcefile and compiler_support.memcache():get2(target:name() .. m.sourcefile, "compiling"))
                 if rebuild then
                     return true
                 end
