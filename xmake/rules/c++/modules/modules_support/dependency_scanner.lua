@@ -276,6 +276,20 @@ function _fill_needed_module(target, modules, module)
     return needed_modules
 end
 
+function _get_package_modules(target, package, opt)
+    local package_modules
+
+    local modulesdir = path.join(package:installdir(), "modules")
+    local metafiles = os.files(path.join(modulesdir, "*", "*.meta-info"))
+    for _, metafile in ipairs(metafiles) do
+        package_modules = package_modules or {}
+        local modulefile, name, metadata = _parse_meta_info(target, metafile)
+        package_modules[name] = {file = path.join(modulesdir, modulefile), metadata = metadata}
+    end
+
+    return package_modules
+end
+
 -- get module dependencies
 function get_module_dependencies(target, sourcebatch, opt)
     local cachekey = target:name() .. "/" .. sourcebatch.rulename
@@ -290,9 +304,7 @@ function get_module_dependencies(target, sourcebatch, opt)
             if modules then
                 _check_circular_dependencies(modules)
             end
-            -- print(target:name(), "BEFORE", modules)
             modules = cull_unused_modules(target, modules)
-            -- print(target:name(), "AFTER", modules)
             compiler_support.localcache():set2("modules", cachekey, modules)
             compiler_support.localcache():save()
         end
@@ -433,20 +445,6 @@ function fallback_generate_dependencies(target, jsonfile, sourcefile, preprocess
     table.insert(output.rules, rule)
     local jsondata = json.encode(output)
     io.writefile(jsonfile, jsondata)
-end
-
-function _get_package_modules(target, package, opt)
-    local package_modules
-
-    local modulesdir = path.join(package:installdir(), "modules")
-    local metafiles = os.files(path.join(modulesdir, "*", "*.meta-info"))
-    for _, metafile in ipairs(metafiles) do
-        package_modules = package_modules or {}
-        local modulefile, name, metadata = _parse_meta_info(target, metafile)
-        package_modules[name] = {file = path.join(modulesdir, modulefile), metadata = metadata}
-    end
-
-    return package_modules
 end
 
 -- extract packages modules dependencies

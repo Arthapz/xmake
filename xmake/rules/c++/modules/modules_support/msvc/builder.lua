@@ -147,10 +147,10 @@ function _get_requiresflags(target, module, opt)
         -- remove duplicates
         local contains = {}
         for _, map in ipairs(deps_flags) do
-            local _, value = map[2]:split("=")[1], map[2]:split("=")[2]
-            if not contains[value] then
+            local name, _ = map[2]:split("=")[1], map[2]:split("=")[2]
+            if not contains[name] then
                 table.insert(requiresflags, map)
-                contains[value] = true
+                contains[name] = true
             end
         end
         compiler_support.memcache():set2(cachekey, "requiresflags", requiresflags)
@@ -183,15 +183,13 @@ function init_build_for(target, batch, modules, opt)
             return { modulemap_populatejob_name = {
                 name = job_name,
                 job = batch:addjob(job_name, function(index, total)
-                    progress.show((index * 100) / total, "${color.build.object}populating.%s.map for target <%s>", opt.type, target:name())
+                    progress.show((index * 100) / total, "${color.build.target}<%s> populating.%s.map", target:name(), opt.type)
                     _populate_module_map(target, modules)
                 end)}}
         else
-            batch:show_progress(opt.progress, "${color.build.object}populating.%s.map for target <%s>", opt.type, target:name())
+            batch:show_progress(opt.progress, "${color.build.target}<%s> populating.%s.map", target:name(), opt.type)
             _populate_module_map(target, modules)
         end
-
-        compiler_support.localcache():set2(target:name(), "module_map_initialized", true)
     end
 end
 
@@ -212,8 +210,9 @@ function get_module_required_defines(target, sourcefile)
 end
 
 -- build module file for batchjobs
-function make_module_build_job(target, batchjobs, job_name, deps, name, provide, module, cppfile, objectfile, opt)
+function make_module_build_job(target, batchjobs, job_name, deps, opt)
 
+    local name, provide, _ = compiler_support.get_provided_module(opt.module)
     local bmifile = provide and compiler_support.get_bmi_path(provide.bmi)
     local dryrun = option.get("dry-run")
     local populate_job_name = get_modulemap_populate_jobname(target)
@@ -221,103 +220,106 @@ function make_module_build_job(target, batchjobs, job_name, deps, name, provide,
     return {
         name = job_name,
         deps = table.join({populate_job_name}, deps),
-        sourcefile = cppfile,
-        job = batchjobs:newjob(name or cppfile, function(index, total)
+        sourcefile = opt.cppfile,
+        job = batchjobs:newjob(name or opt.cppfile, function(index, total)
 
             local compinst = compiler.load("cxx", {target = target})
-            local compflags = compinst:compflags({sourcefile = cppfile, target = target})
+            local compflags = compinst:compflags({sourcefile = opt.cppfile, target = target})
 
             -- append requires flags
-            if module.requires then
-                _append_requires_flags(target, module, name, cppfile, bmifile, opt)
+            if opt.module.requires then
+                _append_requires_flags(target, opt.module, name, opt.cppfile, bmifile, opt)
             end
 
-            local dependfile = target:dependfile(bmifile or objectfile)
+            local dependfile = target:dependfile(bmifile or opt.objectfile)
             local dependinfo = depend.load(dependfile) or {}
             dependinfo.files = {}
             local depvalues = {compinst:program(), compflags}
 
             -- compile if it's a named module
-            if opt.build and (provide or compiler_support.has_module_extension(cppfile)) then
-                progress.show((index * 100) / total, "${color.build.object}compiling.module.$(mode) %s for target <%s>", name or cppfile, target:name())
+            if opt.build and (provide or compiler_support.has_module_extension(opt.cppfile)) then
+                progress.show((index * 100) / total, "${color.build.target}<%s> ${clear}${color.build.object}compiling.module.$(mode) %s", target:name(), name or opt.cppfile)
 
                 if not dryrun then
-                    local objectdir = path.directory(objectfile)
+                    local objectdir = path.directory(opt.objectfile)
                     if not os.isdir(objectdir) then
                         os.mkdir(objectdir)
                     end
                 end
 
-                local fileconfig = target:fileconfig(cppfile)
+                local fileconfig = target:fileconfig(opt.cppfile)
                 local external = fileconfig and fileconfig.external
-                local flags = _make_modulebuildflags(target, provide, bmifile, cppfile, objectfile, {external = external})
+                local flags = _make_modulebuildflags(target, provide, bmifile, opt.cppfile, opt.objectfile, {external = external})
 
-                _compile(target, flags, cppfile)
+                _compile(target, flags, opt.cppfile)
             end
 
-            table.insert(dependinfo.files, cppfile)
+            table.insert(dependinfo.files, opt.cppfile)
             dependinfo.values = depvalues
             depend.save(dependinfo, dependfile)
         end)}
 end
 
 -- build module file for batchcmds
-function make_module_build_cmds(target, batchcmds, name, provide, module, cppfile, objectfile, opt)
+function make_module_build_cmds(target, batchcmds, opt)
 
+    local name, provide, _ = compiler_support.get_provided_module(opt.module)
     local bmifile = provide and compiler_support.get_bmi_path(provide.bmi)
 
     -- append requires flags
-    if module.requires then
-        _append_requires_flags(target, module, name, cppfile, bmifile, opt)
+    if opt.module.requires then
+        _append_requires_flags(target, opt.module, name, opt.cppfile, bmifile, opt)
     end
 
     if opt.build then
-        if provide or compiler_support.has_module_extension(cppfile) then
-            batchcmds:show_progress(opt.progress, "${color.build.object}compiling.module.$(mode) %s for target <%s>", name or cppfile, target:name())
-            batchcmds:mkdir(path.directory(objectfile))
+        if provide or compiler_support.has_module_extension(opt.cppfile) then
+            batchcmds:show_progress(opt.progress, "${color.build.target}<%s> ${clear}${color.build.object}compiling.module.$(mode) %s", target:name(), name or opt.cppfile)
+            batchcmds:mkdir(path.directory(opt.objectfile))
 
-            local fileconfig = target:fileconfig(cppfile)
+            local fileconfig = target:fileconfig(opt.cppfile)
                 local external = fileconfig and fileconfig.external
-            local flags = _make_modulebuildflags(target, provide, bmifile, cppfile, objectfile, {batchcmds = true, external = external})
-            _batchcmds_compile(batchcmds, target, flags, cppfile)
+            local flags = _make_modulebuildflags(target, provide, bmifile, opt.cppfile, opt.objectfile, {batchcmds = true, external = external})
+            _batchcmds_compile(batchcmds, target, flags, opt.cppfile)
         end
     end
-    batchcmds:add_depfiles(cppfile)
+    batchcmds:add_depfiles(opt.cppfile)
 
-   return os.mtime(objectfile)
+   return os.mtime(opt.objectfile)
 end
 
 -- build headerunit file for batchjobs
 function make_headerunit_build_job(target, job_name, batchjobs, headerunit, bmifile, outputdir, opt)
 
-    add_headerunit_to_target_mapper(target, headerunit, bmifile)
-    return {
-        name = job_name,
-        sourcefile = headerunit.path,
-        job = batchjobs:newjob(job_name, function(index, total)
-            if not os.isdir(outputdir) then
-                os.mkdir(outputdir)
-            end
+    local already_exists = add_headerunit_to_target_mapper(target, headerunit, bmifile)
+    if not already_exists then
+        return {
+            name = job_name,
+            sourcefile = headerunit.path,
+            job = batchjobs:newjob(job_name, function(index, total)
+                if not os.isdir(outputdir) then
+                    os.mkdir(outputdir)
+                end
 
-            local compinst = compiler.load("cxx", {target = target})
-            local compflags = compinst:compflags({sourcefile = headerunit.path, target = target})
+                local compinst = compiler.load("cxx", {target = target})
+                local compflags = compinst:compflags({sourcefile = headerunit.path, target = target})
 
-            local dependfile = target:dependfile(bmifile)
-            local dependinfo = depend.load(dependfile) or {}
-            dependinfo.files = {}
-            local depvalues = {compinst:program(), compflags}
+                local dependfile = target:dependfile(bmifile)
+                local dependinfo = depend.load(dependfile) or {}
+                dependinfo.files = {}
+                local depvalues = {compinst:program(), compflags}
 
-            local name = headerunit.unique and headerunit.name or headerunit.path
+                local name = headerunit.unique and headerunit.name or headerunit.path
 
-            if opt.build then
-                progress.show((index * 100) / total, "${color.build.object}compiling.headerunit.$(mode) %s for target <%s>", headerunit.name, target:name())
-                _compile(target, _make_headerunitflags(target, headerunit, bmifile, {}), name, target:objectfile(headerunit.path), true)
-            end
-       
-            table.insert(dependinfo.files, headerunit.path)
-            dependinfo.values = depvalues
-            depend.save(dependinfo, dependfile)
-        end)}
+                if opt.build then
+                    progress.show((index * 100) / total, "${color.build.target}<%s> ${clear}${color.build.object}compiling.headerunit.$(mode) %s", target:name(), headerunit.name)
+                    _compile(target, _make_headerunitflags(target, headerunit, bmifile, {}), name, target:objectfile(headerunit.path), true)
+                end
+
+                table.insert(dependinfo.files, headerunit.path)
+                dependinfo.values = depvalues
+                depend.save(dependinfo, dependfile)
+            end)}
+    end
 end
 
 -- build headerunit file for batchcmds
@@ -329,7 +331,7 @@ function make_headerunit_build_cmds(target, batchcmds, headerunit, bmifile, outp
 
     if opt.build then
         local name = headerunit.unique and headerunit.name or headerunit.path
-        batchcmds:show_progress(opt.progress, "${color.build.object}compiling.headerunit.$(mode) %s for target <%s>", name, target:name())
+        batchcmds:show_progress(opt.progress, "${color.build.target}<%s> ${clear}${color.build.object}compiling.headerunit.$(mode) %s", target:name(), name)
         _batchcmds_compile(batchcmds, target, _make_headerunitflags(target, headerunit, bmifile, {batchcmds = true, bmifile = bmifile}))
     end
     batchcmds:add_depfiles(headerunit.path)

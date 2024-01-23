@@ -74,29 +74,22 @@ rule("c++.build.modules.builder")
                     table.join2(sourcebatch.sourcefiles, deps_sourcefiles)
                 end
             end
+
+            -- append std module
             table.join2(sourcebatch.sourcefiles, compiler_support.get_stdmodules(target) or {})
 
-            compiler_support.patch_sourcebatch(target, sourcebatch, opt)
-            local modules = dependency_scanner.get_module_dependencies(target, sourcebatch, opt)
-
             -- extract packages modules dependencies
-            local package_modules_data = dependency_scanner.get_all_packages_modules(target, modules, opt)
+            local package_modules_data = dependency_scanner.get_all_packages_modules(target, opt)
             if package_modules_data then
                 -- append to sourcebatch
                 for _, package_module_data in pairs(package_modules_data) do
                     table.insert(sourcebatch.sourcefiles, package_module_data.file)
-                    target:fileconfig_add(package_module_data.file, {defines = package_module_data.metadata.defines, external = true})
+                    target:fileconfig_add(package_module_data.file, {external = true, defines = package_module_data.metadata.defines})
                 end
-
-                -- we need to repatch and regenerate dependencies at this point
-                regenerate = true
             end
 
-            if regenerate then
-                opt.regenerate = true
-                compiler_support.patch_sourcebatch(target, sourcebatch, opt)
-                modules = dependency_scanner.get_module_dependencies(target, sourcebatch, opt)
-            end
+            compiler_support.patch_sourcebatch(target, sourcebatch, opt)
+            local modules = dependency_scanner.get_module_dependencies(target, sourcebatch, opt)
 
             opt.batchjobs = true
 
@@ -138,10 +131,7 @@ rule("c++.build.modules.builder")
                 -- append to sourcebatch
                 for _, package_module_data in pairs(package_modules_data) do
                     table.insert(sourcebatch.sourcefiles, package_module_data.file)
-                    target:fileconfig_add(package_module_data.file, {external = true})
-                    if package_module_data.metadata.defines then
-                        target:fileconfig_add(package_module_data.file, {defines = package_module_data.metadata.defines})
-                    end
+                    target:fileconfig_add(package_module_data.file, {external = true, defines = package_module_data.metadata.defines})
                 end
             end
 

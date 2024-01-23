@@ -55,7 +55,13 @@ end
 
 -- use the given stdlib? e.g. libc++ or libstdc++
 function _use_stdlib(target, name)
-    local stdlib = target:data("cxx.modules.stdlib") or "libstdc++"
+    local default = "libstdc++"
+    if is_plat("windows") then
+        default = "msstl"
+    elseif is_plat("macos") then
+        default = "libc++"
+    end
+    local stdlib = target:data("cxx.modules.stdlib") or default
     return stdlib == name
 end
 
@@ -205,8 +211,28 @@ end
 
 -- not supported atm
 function get_stdmodules(target)
-    local modules = {}
-    return modules
+    if _use_stdlib(target, "libc++") then
+        -- TODO support libc++ std module file when https://github.com/xmake-io/xmake/pull/4630
+        return {}
+    elseif _use_stdlib(target, "libstdc++") then
+        -- libstdc++ doesn't have a std module file atm
+        return {}
+    elseif _use_stdlib(target, "msstl") then
+        -- msstl std module file is not compatible with llvm <= 18
+        -- local toolchain = target:toolchain("clang")
+        -- local msvc = import("core.tool.toolchain", {anonymous = true}).load("msvc", {plat = toolchain:plat(), arch = toolchain:arch()})
+        -- if msvc then
+        --     local vcvars = msvc:config("vcvars")
+        --     if vcvars.VCInstallDir and vcvars.VCToolsVersion then
+        --         modules = {}
+        --
+        --         local stdmodulesdir = path.join(vcvars.VCInstallDir, "Tools", "MSVC", vcvars.VCToolsVersion, "modules")
+        --         assert(stdmodulesdir, "Can't enable C++23 std modules, directory missing !")
+        --
+        --         return {path.join(stdmodulesdir, "std.ixx"), path.join(stdmodulesdir, "std.compat.ixx")}
+        --     end
+        -- end
+    end
 end
 
 function get_bmi_extension()
