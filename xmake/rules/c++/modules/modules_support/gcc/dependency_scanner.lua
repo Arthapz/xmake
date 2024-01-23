@@ -39,7 +39,7 @@ function generate_dependencies(target, sourcebatch, opt)
         local dependfile = target:dependfile(sourcefile)
         depend.on_changed(function()
             if opt.progress then
-                progress.show(opt.progress, "${color.build.object}generating.module.deps %s for target <%s>", sourcefile, target:name())
+                progress.show(opt.progress, "${color.build.target}<%s> generating.module.deps %s", target:name(), sourcefile)
             end
 
             local outputdir = compiler_support.get_outputdir(target, sourcefile)

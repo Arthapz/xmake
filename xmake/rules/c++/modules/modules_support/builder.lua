@@ -175,6 +175,23 @@ function _is_duplicated_headerunit(target, headerunit)
     return false
 end
 
+-- add populate job
+function _init_build_for(target, batch, modules, opt)
+
+    if opt.batchjobs then
+        local job_name = get_modulemap_populate_jobname(target)
+        return { modulemap_populatejob_name = {
+            name = job_name,
+            job = batch:addjob(job_name, function(index, total)
+                progress.show((index * 100) / total, "${color.build.target}<%s> populating.%s.map", target:name(), opt.type)
+                _builder(target).populate_module_map(target, modules)
+            end)}}
+    else
+        batch:show_progress(opt.progress, "${color.build.target}<%s> populating.%s.map", target:name(), opt.type)
+        _builder(target).populate_module_map(target, modules)
+    end
+end
+
 function _builder(target)
 
     local cachekey = tostring(target)
@@ -231,7 +248,7 @@ function build_modules_for_batchjobs(target, batchjobs, sourcebatch, modules, op
       end
     }))
 
-    local tailjob = _builder(target).init_build_for(target, batchjobs, modules, table.join({type = "module"}, opt))
+    local tailjob = _init_build_for(target, batchjobs, modules, table.join({type = "module"}, opt))
     table.join2(modulesjobs, tailjob)
 
     -- build batchjobs for modules
@@ -243,7 +260,7 @@ function build_modules_for_batchcmds(target, batchcmds, sourcebatch, modules, op
 
     local depmtime = 0
     opt.progress = opt.progress or 0
-    _builder(target).init_build_for(target, batchcmds, modules, table.join({type = "module"}, opt))
+    _init_build_for(target, batchcmds, modules, table.join({type = "module"}, opt))
 
     -- build modules
     _build_modules(target, sourcebatch, modules, table.join(opt, {

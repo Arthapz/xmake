@@ -31,17 +31,6 @@ import("private.tools.vstool")
 import("compiler_support")
 import(".builder", {inherit = true})
 
--- populate module map 
-function _populate_module_map(target, modules)
-    for _, module in pairs(modules) do
-        local name, provide, cppfile = compiler_support.get_provided_module(module)
-        if provide then
-            local bmifile = compiler_support.get_bmi_path(provide.bmi)
-            add_module_to_target_mapper(target, name, cppfile, bmifile, {deps = module.requires})
-        end
-    end
-end
-
 -- get flags for building a module
 function _make_modulebuildflags(target, provide, bmifile, sourcefile, objectfile, opt)
 
@@ -175,20 +164,13 @@ function _append_requires_flags(target, module, name, cppfile, bmifile, opt)
     target:fileconfig_add(cppfile, {force = {cxxflags = cxxflags}})
 end
 
-function init_build_for(target, batch, modules, opt)
-
-    if opt.type == "module" then
-        if opt.batchjobs then
-            local job_name = get_modulemap_populate_jobname(target)
-            return { modulemap_populatejob_name = {
-                name = job_name,
-                job = batch:addjob(job_name, function(index, total)
-                    progress.show((index * 100) / total, "${color.build.target}<%s> populating.%s.map", target:name(), opt.type)
-                    _populate_module_map(target, modules)
-                end)}}
-        else
-            batch:show_progress(opt.progress, "${color.build.target}<%s> populating.%s.map", target:name(), opt.type)
-            _populate_module_map(target, modules)
+-- populate module map 
+function populate_module_map(target, modules)
+    for _, module in pairs(modules) do
+        local name, provide, cppfile = compiler_support.get_provided_module(module)
+        if provide then
+            local bmifile = compiler_support.get_bmi_path(provide.bmi)
+            add_module_to_target_mapper(target, name, cppfile, bmifile, {deps = module.requires})
         end
     end
 end

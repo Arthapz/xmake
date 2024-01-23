@@ -94,100 +94,10 @@ function _batchcmds_compile(batchcmds, target, flags, sourcefile)
     batchcmds:compilev(flags, {compiler = compinst, sourcekind = "cxx"})
 end
 
--- fill module mapper with modules
-function _populate_target_mapper_with_modules(target, modules)
-
-    local projectdir = os.projectdir()
-
-    -- append all modules
-    for _, module in pairs(modules) do
-        local name, provide = compiler_support.get_provided_module(module)
-        if provide then
-            add_module_to_target_mapper(target, name, provide.sourcefile, path.absolute(compiler_support.get_bmi_path(provide.bmi), projectdir))
-        end
-    end
-
-    -- then update their deps
-    for _, module in pairs(modules) do
-        local name, provide = get_provided_module(module)
-        if provide then
-            local bmifile = compiler_support.get_bmi_path(provide.bmi)
-            add_module_to_target_mapper(target, name, provide.sourcefile, path.absolute(bmifile, projectdir), {deps = module.requires})
-        end
-    end
-end
-
--- fill module mapper with header units
-function _populate_target_mapper_with_headerunits(target, headerunits, opt)
-
-    local outputdir = opt.outputdir
-    for _, headerunit in ipairs(headerunits) do
-        local bmifile = path.join(outputdir, path.filename(headerunit.name) .. compiler_support.get_bmi_extension())
-
-        local headerunit_path = _get_headerunit_path(headerunit)
-        add_headerunit_to_target_mapper(target, {name = headerunit.name, path = headerunit_path}, bmifile)
-    end
-
-    _flush_target_mapper(target)
-end
-
--- get relative path of headerunit if headerunit is :quote
-function _get_headerunit_path(headerunit)
-
-    local projectdir = os.projectdir()
-
-    local headerunit_path
-    if headerunit.type == ":quote" then
-        headerunit_path = path.join(".", path.relative(headerunit.path, projectdir))
-    elseif headerunit.type == ":angle" then
-        -- if path is relative then its a subtarget path
-        headerunit_path = path.is_absolute(headerunit.path) and headerunit.path or path.join(".", headerunit.path)
-    end
-
-    return headerunit_path
-end
-
 function _module_map_cachekey(target)
 
     local mode = config.mode()
     return target:name() .. "module_mapper" .. (mode or "")
-end
-
--- get or create a target module mapper
-function _get_target_module_mapper(target)
-
-    local memcache = compiler_support.memcache()
-    local mapper = memcache:get2(target:name(), "module_mapper")
-    if not mapper then
-        mapper = compiler_support.localcache():get(_module_map_cachekey(target)) or {}
-
-        memcache:set2(target:name(), "module_mapper", mapper)
-    end
-
-    return mapper
-end
-
--- add a module or header unit into a mapper
---
-function _add_to_target_mapper(target, name, bmi, deps)
-
-    local mapper = _get_target_module_mapper(target)
-
-    mapper[name] = {map = name .. " " .. os.args(bmi, {escape = true}), deps = deps}
-end
-
--- get a module or headerunit from mapper
-function _get_from_target_mapper(target, name)
-
-    local mapper = _get_target_module_mapper(target)
-
-    if mapper[name] then
-        return mapper[name]
-    end
-end
-
-function _get_headerunit_maplines()
-
 end
 
 -- generate a module mapper file for build a headerunit
@@ -246,11 +156,11 @@ function _get_maplines(target, module)
 
         -- append deps
         if dep_module.opt and dep_module.opt.deps then
-            local deps = _get_maplines(dep_target, { name = dep_module.name, bmi = bmifile, requires = dep_module.opt.deps })
+            local deps = _get_maplines(dep_target, { name = dep_module.name, bmi = dep_module.bmifile, requires = dep_module.opt.deps })
             table.join2(maplines, deps)
         end
     end
-    
+
     -- remove duplicates
     return table.unique(maplines)
 end
@@ -280,38 +190,25 @@ function _generate_modulemapper_file(target, module)
     return path
 end
 
--- flush modulemap to mapper file cache
-function _flush_target_mapper(target)
+-- populate module map 
+function populate_module_map(target, modules)
 
-    local mapper = _get_target_module_mapper(target)
-    local localcache = compiler_support.localcache()
+    local projectdir = os.projectdir()
 
-    -- not using set2/get2 to flush only current target mapper
-    localcache:set(_module_map_cachekey(target), mapper)
-    localcache:save(_module_map_cachekey(target))
-end
+    -- append all modules
+    for _, module in pairs(modules) do
+        local name, provide = compiler_support.get_provided_module(module)
+        if provide then
+            add_module_to_target_mapper(target, name, provide.sourcefile, path.absolute(compiler_support.get_bmi_path(provide.bmi), projectdir))
+        end
+    end
 
--- add populate job
-function init_build_for(target, batch, modules, opt)
-
-    if opt.batchjobs then
-        local job_name = get_modulemap_populate_jobname(target)
-        return { modulemap_populatejob_name = {
-            name = job_name,
-            job = batch:addjob(job_name, function(index, total)
-                progress.show((index * 100) / total, "${color.build.object}populating.%s.map for target <%s>", opt.type, target:name())
-                if opt.type == "module" then
-                    _populate_target_mapper_with_modules(target, modules)
-                else
-                    _populate_target_mapper_with_headerunits(target, modules, opt)
-                end
-            end)}}
-    else
-        batch:show_progress(opt.progress, "${color.build.object}populating.%s.map for target <%s>", opt.type, target:name())
-        if opt.type == "module" then
-            _populate_target_mapper_with_modules(target, modules)
-        else
-            _populate_target_mapper_with_headerunits(target, modules, opt)
+    -- then update their deps
+    for _, module in pairs(modules) do
+        local name, provide = compiler_support.get_provided_module(module)
+        if provide then
+            local bmifile = compiler_support.get_bmi_path(provide.bmi)
+            add_module_to_target_mapper(target, name, provide.sourcefile, path.absolute(bmifile, projectdir), {deps = module.requires})
         end
     end
 end
@@ -333,8 +230,9 @@ function get_module_required_defines(target, sourcefile)
 end
 
 -- build module file for batchjobs
-function make_module_build_job(target, batchjobs, job_name, deps, name, provide, module, cppfile, objectfile, opt)
+function make_module_build_job(target, batchjobs, job_name, deps, opt)
 
+    local name, provide, _ = compiler_support.get_provided_module(opt.module)
     local bmifile = provide and compiler_support.get_bmi_path(provide.bmi)
     local module_mapperflag = compiler_support.get_modulemapperflag(target)
     local populate_job_name = get_modulemap_populate_jobname(target)
@@ -342,99 +240,113 @@ function make_module_build_job(target, batchjobs, job_name, deps, name, provide,
     return {
         name = job_name,
         deps = table.join({populate_job_name}, deps),
-        sourcefile = cppfile,
-        job = batchjobs:newjob(name or cppfile, function(index, total)
+        sourcefile = opt.cppfile,
+        job = batchjobs:newjob(name or opt.cppfile, function(index, total)
 
             local compinst = compiler.load("cxx", {target = target})
-            local compflags = compinst:compflags({sourcefile = cppfile, target = target})
+            local compflags = compinst:compflags({sourcefile = opt.cppfile, target = target})
 
             -- generate and append module mapper file
             local module_mapper
-            if provide or module.requires then
-                module_mapper = _generate_modulemapper_file(target, module)
-                target:fileconfig_add(cppfile, {force = {cxxflags = {module_mapperflag .. module_mapper}}})
+            if provide or opt.module.requires then
+                module_mapper = _generate_modulemapper_file(target, opt.module)
+                target:fileconfig_add(opt.cppfile, {force = {cxxflags = {module_mapperflag .. module_mapper}}})
             end
 
-            local dependfile = target:dependfile(bmifile or objectfile)
+            local dependfile = target:dependfile(bmifile or opt.objectfile)
             local dependinfo = depend.load(dependfile) or {}
             dependinfo.files = {}
             local depvalues = {compinst:program(), compflags}
 
             if opt.build then
                 -- compile if it's a named module
-                if provide or compiler_support.has_module_extension(cppfile) then
-                    progress.show((index * 100) / total, "${color.build.object}compiling.module.$(mode) %s for target <%s>", name or cppfile, target:name())
+                if provide or compiler_support.has_module_extension(opt.cppfile) then
+                    progress.show((index * 100) / total, "${color.build.target}<%s> ${clear}${color.build.object}compiling.module.$(mode) %s", target:name(), name or opt.cppfile)
+                    if option.get("diagnosis") then
+                        print("mapper file --------\n%s--------", io.readfile(module_mapper))
+                    end
 
                     local flags = _make_modulebuildflags(target, opt)
-                    _compile(target, flags, cppfile, objectfile)
+                    _compile(target, flags, opt.cppfile, opt.objectfile)
                     os.tryrm(module_mapper)
                 end
             end
-            table.insert(dependinfo.files, cppfile)
+            table.insert(dependinfo.files, opt.cppfile)
             dependinfo.values = depvalues
             depend.save(dependinfo, dependfile)
         end)}
 end
 
 -- build module file for batchcmds
-function make_module_build_cmds(target, batchcmds, name, provide, module, cppfile, objectfile, opt)
+function make_module_build_cmds(target, batchcmds, opt)
 
-    local bmifile = provide and compiler_support.get_bmi_path(provide.bmi)
+    local name, provide, _ = compiler_support.get_provided_module(opt.module)
     local module_mapperflag = compiler_support.get_modulemapperflag(target)
 
     -- generate and append module mapper file
     local module_mapper
-    if provide or module.requires then
-        module_mapper = _generate_modulemapper_file(target, module)
-        target:fileconfig_add(cppfile, {force = {cxxflags = {module_mapperflag .. module_mapper}}})
+    if provide or opt.module.requires then
+        module_mapper = _generate_modulemapper_file(target, opt.module)
+        target:fileconfig_add(opt.cppfile, {force = {cxxflags = {module_mapperflag .. module_mapper}}})
     end
 
     if opt.build then
         -- compile if it's a named module
-        if provide or compiler_support.has_module_extension(cppfile) then
-            batchcmds:show_progress(opt.progress, "${color.build.object}compiling.module.$(mode) %s for target <%s>", name or cppfile, target:name())
-            batchcmds:mkdir(path.directory(objectfile))
+        if provide or compiler_support.has_module_extension(opt.cppfile) then
+            batchcmds:show_progress(opt.progress, "${color.build.target}<%s> ${clear}${color.build.object}compiling.module.$(mode) %s", target:name(), name or opt.cppfile)
+            if option.get("diagnosis") then
+                batchcmds:print("mapper file: %s", io.readfile(module_mapper))
+            end
+            batchcmds:mkdir(path.directory(opt.objectfile))
 
-            _batchcmds_compile(batchcmds, target, _make_modulebuildflags(target, {batchcmds = true, sourcefile = cppfile}), cppfile)
+            _batchcmds_compile(batchcmds, target, _make_modulebuildflags(target, {batchcmds = true, sourcefile = opt.cppfile}), opt.cppfile)
         end
     end
 
-    batchcmds:add_depfiles(cppfile)
+    batchcmds:add_depfiles(opt.cppfile)
 
-    return os.mtime(objectfile)
+    return os.mtime(opt.objectfile)
 end
 
 -- build headerunit file for batchjobs
 function make_headerunit_build_job(target, job_name, batchjobs, headerunit, bmifile, outputdir, opt)
 
-    return {
-        name = job_name,
-        sourcefile = headerunit.path,
-        job = batchjobs:newjob(job_name, function(index, total)
-            if not os.isdir(outputdir) then
-                os.mkdir(outputdir)
-            end
+    local _headerunit = headerunit
+    _headerunit.path = headerunit.type == ":quote" and "./" .. path.relative(headerunit.path) or headerunit.path
+    local already_exists = add_headerunit_to_target_mapper(target, _headerunit, bmifile)
+    if not already_exists then
+        return {
+            name = job_name,
+            sourcefile = headerunit.path,
+            job = batchjobs:newjob(job_name, function(index, total)
+                if not os.isdir(outputdir) then
+                    os.mkdir(outputdir)
+                end
 
-            local compinst = compiler.load("cxx", {target = target})
-            local compflags = compinst:compflags({sourcefile = headerunit.path, target = target})
+                local compinst = compiler.load("cxx", {target = target})
+                local compflags = compinst:compflags({sourcefile = headerunit.path, target = target})
 
-            local dependfile = target:dependfile(bmifile)
-            local dependinfo = depend.load(dependfile) or {}
-            dependinfo.files = {}
-            local depvalues = {compinst:program(), compflags}
+                local dependfile = target:dependfile(bmifile)
+                local dependinfo = depend.load(dependfile) or {}
+                dependinfo.files = {}
+                local depvalues = {compinst:program(), compflags}
 
-            if opt.build then
-                local headerunit_mapper = _generate_headerunit_modulemapper_file({name = path.normalize(headerunit.path), bmifile = bmifile})
+                if opt.build then
+                    local headerunit_mapper = _generate_headerunit_modulemapper_file({name = path.normalize(headerunit.path), bmifile = bmifile})
 
-                progress.show((index * 100) / total, "${color.build.object}compiling.headerunit.$(mode) %s for target <%s>", headerunit.name, target:name())
-                _compile(target, _make_headerunitflags(target, headerunit, headerunit_mapper, opt), path.translate(path.filename(headerunit.name)), bmifile)
-                os.tryrm(headerunit_mapper)
-            end
+                    progress.show((index * 100) / total, "${color.build.target}<%s> ${clear}${color.build.object}compiling.headerunit.$(mode) %s", target:name(), headerunit.name)
+                    if option.get("diagnosis") then
+                        print("mapper file --------\n%s--------", io.readfile(headerunit_mapper))
+                    end
+                    _compile(target, _make_headerunitflags(target, headerunit, headerunit_mapper, opt), path.translate(path.filename(headerunit.name)), bmifile)
+                    os.tryrm(headerunit_mapper)
+                end
 
-            table.insert(dependinfo.files, headerunit.path)
-            dependinfo.values = depvalues
-            depend.save(dependinfo, dependfile)
-        end)}
+                table.insert(dependinfo.files, headerunit.path)
+                dependinfo.values = depvalues
+                depend.save(dependinfo, dependfile)
+            end)}
+    end
 end
 
 -- build headerunit file for batchcmds
@@ -443,9 +355,16 @@ function make_headerunit_build_cmds(target, batchcmds, headerunit, bmifile, outp
     local headerunit_mapper = _generate_headerunit_modulemapper_file({name = path.normalize(headerunit.path), bmifile = bmifile})
     batchcmds:mkdir(outputdir)
 
+    local _headerunit = headerunit
+    _headerunit.path = headerunit.type == ":quote" and "./" .. path.relative(headerunit.path) or headerunit.path
+    add_headerunit_to_target_mapper(target, _headerunit, bmifile)
+
     if opt.build then
         local name = headerunit.unique and headerunit.name or headerunit.path
-        batchcmds:show_progress(opt.progress, "${color.build.object}compiling.headerunit.$(mode) %s for target <%s>", name, target:name())
+        batchcmds:show_progress(opt.progress, "${color.build.target}<%s> ${clear}${color.build.object}compiling.headerunit.$(mode) %s", target:name(), name)
+        if option.get("diagnosis") then
+            batchcmds:print("mapper file: %s", io.readfile(headerunit_mapper))
+        end
         _batchcmds_compile(batchcmds, target, _make_headerunitflags(target, headerunit, headerunit_mapper, {batchcmds = true, bmifile = bmifile}))
     end
 

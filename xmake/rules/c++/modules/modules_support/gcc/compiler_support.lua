@@ -100,9 +100,8 @@ function get_target_module_mapperpath(target)
 end
 
 -- not supported atm
-function get_stdmodules(target)
-    local modules = {}
-    return modules
+function get_stdmodules(_)
+    return {}
 end
 
 function get_bmi_extension()
