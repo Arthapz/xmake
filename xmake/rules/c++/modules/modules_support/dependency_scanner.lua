@@ -182,7 +182,7 @@ function _get_edges(nodes, modules)
               for _, required_node in ipairs(nodes) do
                   local name, _, _ = compiler_support.get_provided_module(modules[required_node])
                   if name and name == required_name then
-                      table.insert(edges, {node, required_node})
+                      table.insert(edges, {required_node, node})
                       break
                   end
               end
@@ -396,9 +396,9 @@ function get_all_packages_modules(target, opt)
 end
 
 -- topological sort
-function sort_modules_by_dependencies(objectfiles, modules)
+function sort_modules_by_dependencies(target, objectfiles, modules)
     local result = {}
-    local edges, nodeps_nodes = _get_edges(objectfiles, modules)
+    local edges = _get_edges(objectfiles, modules)
     local dag = graph.new(true)
     for _, e in ipairs(edges) do
         dag:add_edge(e[1], e[2])
@@ -418,10 +418,17 @@ function sort_modules_by_dependencies(objectfiles, modules)
     for _, objectfile in ipairs(objectfiles_sorted) do
         table.insert(result, objectfile)
     end
+
     local objectfiles_sorted_set = hashset.from(objectfiles_sorted)
     for _, objectfile in ipairs(objectfiles) do
         if not objectfiles_sorted_set:has(objectfile) then
-            table.insert(result, objectfile)
+            -- cull unreferenced non-public named module but add non-module files and implementation modules
+            local _, provide, cppfile = compiler_support.get_provided_module(modules[objectfile])
+            local fileconfig = target:fileconfig(cppfile)
+            local public = fileconfig and fileconfig.public
+            if not provide or public then
+                table.insert(result, objectfile)
+            end
         end
     end
     return result
@@ -431,7 +438,7 @@ end
 function get_targetdeps_modules(target)
     local sourcefiles
     for _, dep in ipairs(target:orderdeps()) do
-        local sourcebatch = dep:sourcebatches()["c++.build.modules.builder"]
+        local sourcebatch = dep:sourcebatches()["c++.moduleonly"] or dep:sourcebatches()["c++.build.modules.builder"]
         if sourcebatch and sourcebatch.sourcefiles then
             for _, sourcefile in ipairs(sourcebatch.sourcefiles) do
                 local fileconfig = dep:fileconfig(sourcefile)

@@ -64,14 +64,27 @@ function patch_sourcebatch(target, sourcebatch)
 end
 
 -- cull sourcebatch objectfiles
-function cull_objectfiles(target, sourcebatch)
+function cull_objectfiles(target, modules, sourcebatch)
 
-    sourcebatch.sourcekind = "cxx"
+    -- don't cull for executables
+    if target:kind() == "binary" then
+        return
+    end
+
     sourcebatch.objectfiles = {}
     for _, sourcefile in ipairs(sourcebatch.sourcefiles) do
-        local fileconfig = target:fileconfig(sourcefile)
-        if not (fileconfig and fileconfig.external) then
-            local objectfile = target:objectfile(sourcefile)
+        local objectfile = target:objectfile(sourcefile)
+        local module = modules[objectfile]
+        local _, provide, _ = get_provided_module(module)
+
+        if provide then
+            local fileconfig = target:fileconfig(sourcefile)
+            local public = fileconfig and fileconfig.public
+            local external = fileconfig and fileconfig.external
+            if not public and not external then
+                table.insert(sourcebatch.objectfiles, objectfile)
+            end
+        else
             table.insert(sourcebatch.objectfiles, objectfile)
         end
     end
@@ -103,14 +116,14 @@ end
 -- this target contains module files?
 function contains_modules(target)
     -- we can not use `"c++.build.builder"`, because it contains sourcekind/cxx.
-    local target_with_modules = target:sourcebatches()["c++.build.modules"] and true or false
+    local target_with_modules = (target:sourcebatches()["c++.moduleonly"] or target:sourcebatches()["c++.build.modules"]) and true or false
     if not target_with_modules then
         target_with_modules = target:policy("build.c++.modules")
     end
     if not target_with_modules then
         for _, dep in ipairs(target:orderdeps()) do
             local sourcebatches = dep:sourcebatches()
-            if sourcebatches["c++.build.modules"] then
+            if sourcebatches["c++.moduleonly"] or sourcebatches["c++.build.modules"] then
                 target_with_modules = true
                 break
             end

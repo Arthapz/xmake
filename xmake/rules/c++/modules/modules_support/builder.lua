@@ -21,6 +21,7 @@
 -- imports
 import("core.base.json")
 import("core.base.option")
+import("async.runjobs")
 import("private.async.buildjobs")
 import("core.tool.compiler")
 import("core.project.config")
@@ -31,8 +32,7 @@ import("dependency_scanner")
 
 -- build target modules
 function _build_modules(target, sourcebatch, modules, opt)
-    local objectfiles = dependency_scanner.sort_modules_by_dependencies(sourcebatch.objectfiles, modules)
-
+    local objectfiles = sourcebatch.objectfiles
     _builder(target).populate_module_map(target, modules)
 
     -- build modules
@@ -45,18 +45,12 @@ function _build_modules(target, sourcebatch, modules, opt)
         local name, provide, cppfile = compiler_support.get_provided_module(module)
         cppfile = cppfile or module.cppfile
 
-        local fileconfig = target:fileconfig(cppfile)
-        local bmifile = provide and compiler_support.get_bmi_path(provide.bmi)
-        -- add objectfile if module is not from external dep
-        if not (fileconfig and fileconfig.external) then
-            target:add("objectfiles", objectfile)
-        end
-
         local deps = {}
         for _, dep in ipairs(table.keys(module.requires or {})) do
             table.insert(deps, opt.batchjobs and target:name() .. dep or dep)
         end
 
+        local fileconfig = target:fileconfig(cppfile)
         opt.build_module(deps, module, name, provide, objectfile, cppfile, fileconfig)
 
         ::CONTINUE::
@@ -310,6 +304,34 @@ function build_headerunits_for_batchcmds(target, batchcmds, sourcebatch, modules
         opt.stl_headerunit = false
         build_headerunits(user_headerunits)
     end
+end
+
+function generate_metadata(target, modules)
+    local public_modules
+
+    for _, module in pairs(modules) do
+        local _, _, cppfile = compiler_support.get_provided_module(module)
+        local fileconfig = target:fileconfig(cppfile)
+        local public = fileconfig and fileconfig.public
+        if public then
+            public_modules = public_modules or {}
+            table.insert(public_modules, module)
+        end
+    end
+
+    if not public_modules then
+        return
+    end
+
+    local jobs = option.get("jobs") or os.default_njob()
+    runjobs(target:name() .. "_install_modules", function(index) 
+        local module = public_modules[index]
+        local name, _, cppfile = compiler_support.get_provided_module(module)
+        local metafilepath = compiler_support.get_metafile(target, cppfile)
+        progress.show((index * 100) / #public_modules, "${color.build.target}<%s> generating.module.metadata %s", target:name(), name)
+        local metadata = _generate_meta_module_info(target, name, cppfile, module.requires)
+        json.savefile(metafilepath, metadata)
+    end, {comax = jobs, total = #public_modules})
 end
 
 -- flush target module mapper keys
