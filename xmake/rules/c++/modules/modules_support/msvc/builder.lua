@@ -60,7 +60,7 @@ function _compile_one_step(target, bmifile, sourcefile, objectfile, provide)
     end
 end
 
-function _compile_bmi_step(target, bmifile, sourcefile, provide)
+function _compile_bmi_step(target, bmifile, sourcefile, objectfile, provide)
     local ifcoutputflag = compiler_support.get_ifcoutputflag(target)
     local interfaceflag = compiler_support.get_interfaceflag(target)
     local ifconlyflag = compiler_support.get_ifconlyflag(target)
