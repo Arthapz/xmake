@@ -84,9 +84,9 @@ function _compile_objectfile_step(target, bmifile, sourcefile, objectfile, provi
         _compile_one_step(target, bmifile, sourcefile, objectfile, provide)
     else
         if opt and opt.batchcmds then
-            _batchcmds_compile(opt.batchcmds, target, {"-TP"}, sourcefile, objectfile, {bmifile = bmifile})
+            _batchcmds_compile(opt.batchcmds, target, {"-TP"}, sourcefile, objectfile)
         else
-            _compile(target, {"-TP"}, sourcefile, objectfile, {bmifile = bmifile})
+            _compile(target, {"-TP"}, sourcefile, objectfile)
         end
     end
 end
