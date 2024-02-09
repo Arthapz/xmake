@@ -137,8 +137,8 @@ end
 --
 function _generate_modulemapper_file(target, module, cppfile)
     local maplines = _get_maplines(target, module)
-    local path = path.join(os.tmpdir(), target:name(), name or cppfile)
-    local mapper_file = io.open(path, "wb")
+    local mapper_path = path.join(os.tmpdir(), target:name():replace(" ", "_"), name or cppfile:replace(" ", "_"))
+    local mapper_file = io.open(mapper_path, "wb")
     mapper_file:write("root " .. os.projectdir():replace("\\", "/"))
     mapper_file:write("\n")
     for _, mapline in ipairs(maplines) do
@@ -146,7 +146,7 @@ function _generate_modulemapper_file(target, module, cppfile)
         mapper_file:write("\n")
     end
     mapper_file:close()
-    return path
+    return mapper_path
 end
 
 -- populate module map
