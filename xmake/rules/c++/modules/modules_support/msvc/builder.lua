@@ -47,12 +47,15 @@ function _make_modulebuildflags(target, provide, bmifile, opt)
     end
     return flags
 end
-function _compile_one_step(target, bmifile, sourcefile, objectfile, provide)
+function _compile_one_step(target, bmifile, sourcefile, objectfile, provide, opt)
     local ifcoutputflag = compiler_support.get_ifcoutputflag(target)
     local interfaceflag = compiler_support.get_interfaceflag(target)
     local internalpartitionflag = compiler_support.get_internalpartitionflag(target)
     -- get flags
-    local flags = {"-TP", ifcoutputflag, path(bmifile), provide.interface and interfaceflag or internalpartitionflag}
+    local flags = {"-TP"}
+    if provide then
+        table.join2(flags, ifcoutputflag, path(bmifile), provide.interface and interfaceflag or internalpartitionflag)
+    end
     if opt and opt.batchcmds then
         _batchcmds_compile(opt.batchcmds, target, flags, sourcefile, objectfile)
     else
@@ -60,13 +63,13 @@ function _compile_one_step(target, bmifile, sourcefile, objectfile, provide)
     end
 end
 
-function _compile_bmi_step(target, bmifile, sourcefile, objectfile, provide)
+function _compile_bmi_step(target, bmifile, sourcefile, objectfile, provide, opt)
     local ifcoutputflag = compiler_support.get_ifcoutputflag(target)
     local interfaceflag = compiler_support.get_interfaceflag(target)
     local ifconlyflag = compiler_support.get_ifconlyflag(target)
 
     if not ifconlyflag then
-        _compile_one_step(target, bmifile, sourcefile, objectfile, provide)
+        _compile_one_step(target, bmifile, sourcefile, objectfile, provide, opt)
     else
         local flags = {"-TP", ifcoutputflag, path(bmifile), interfaceflag, ifconlyflag}
         if opt and opt.batchcmds then
@@ -77,16 +80,19 @@ function _compile_bmi_step(target, bmifile, sourcefile, objectfile, provide)
     end
 end
 
-function _compile_objectfile_step(target, bmifile, sourcefile, objectfile, provide)
+function _compile_objectfile_step(target, bmifile, sourcefile, objectfile, provide, opt)
     local ifconlyflag = compiler_support.get_ifconlyflag(target)
+    local interfaceflag = compiler_support.get_interfaceflag(target)
+    local internalpartitionflag = compiler_support.get_internalpartitionflag(target)
 
+    local flags = {"-TP", (provide and provide.interface) and interfaceflag or internalpartitionflag}
     if not ifconlyflag then
-        _compile_one_step(target, bmifile, sourcefile, objectfile, provide)
+        _compile_one_step(target, bmifile, sourcefile, objectfile, provide, opt)
     else
         if opt and opt.batchcmds then
-            _batchcmds_compile(opt.batchcmds, target, {"-TP"}, sourcefile, objectfile)
+            _batchcmds_compile(opt.batchcmds, target, flags, sourcefile, objectfile)
         else
-            _compile(target, {"-TP"}, sourcefile, objectfile)
+            _compile(target, flags, sourcefile, objectfile)
         end
     end
 end
@@ -389,18 +395,18 @@ function make_module_buildcmds(target, batchcmds, opt)
             if target:is_binary() then
                 if mapped_bmi then
                     batchcmds:show_progress(opt.progress, "${color.build.target}<%s> ${clear}${color.build.object}compiling.objectfile.$(mode) %s", target:name(), name or opt.cppfile)
-                    _compile_objectfile_step(target, bmifile, opt.cppfile, opt.objectfile, {batchcmds = batchcmds})
+                    _compile_objectfile_step(target, bmifile, opt.cppfile, opt.objectfile, provide, {batchcmds = batchcmds})
                 else
                     batchcmds:show_progress(opt.progress, "${color.build.target}<%s> ${clear}${color.build.object}compiling.module.$(mode) %s", target:name(), name or opt.cppfile)
-                    _compile_one_step(target, bmifile, opt.cppfile, opt.objectfile, {std = (name == "std" or name == "std.compat"), batchcmds = batchcmds})
+                    _compile_one_step(target, bmifile, opt.cppfile, opt.objectfile, provide, {batchcmds = batchcmds})
                 end
             else
                 if not public and not external then
                     batchcmds:show_progress(opt.progress, "${color.build.target}<%s> ${clear}${color.build.object}compiling.module.$(mode) %s", target:name(), name or opt.cppfile)
-                    _compile_one_step(target, bmifile, opt.cppfile, opt.objectfile, {std = (name == "std" or name == "std.compat"), batchcmds = batchcmds})
+                    _compile_one_step(target, bmifile, opt.cppfile, opt.objectfile, provide {batchcmds = batchcmds})
                 else
                     batchcmds:show_progress(opt.progress, "${color.build.target}<%s> ${clear}${color.build.object}compiling.bmi.$(mode) %s", target:name(), name or opt.cppfile)
-                    _compile_bmi_step(target, bmifile, opt.cppfile, {std = (name == "std" or name == "std.compat"), batchcmds = batchcmds})
+                    _compile_bmi_step(target, bmifile, opt.cppfile, provide, {batchcmds = batchcmds})
                 end
             end
         else
