@@ -268,6 +268,12 @@ function _get_configs_file(package, opt)
         table.join2(cxxflags, _get_cflags_from_packagedeps(package, opt))
         table.join2(ldflags,  _get_ldflags_from_packagedeps(package, opt))
         table.join2(shflags,  _get_ldflags_from_packagedeps(package, opt))
+        local runtimes = package:config("runtimes")
+        if runtimes then
+            table.join2(cxxflags, _map_compflags(package, "cxx", "runtime", runtimes))
+            table.join2(ldflags, _map_linkflags(package, "binary", {"cxx"}, "runtime", runtimes))
+            table.join2(shflags, _map_linkflags(package, "shared", {"cxx"}, "runtime", runtimes))
+        end
         if #cflags > 0 then
             file:print("c_args=['%s']", table.concat(cflags, "', '"))
         end

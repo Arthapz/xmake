@@ -279,16 +279,13 @@ function nf_runtime(self, runtime, opt)
                     -- @see https://github.com/llvm/llvm-project/issues/79647
                     llvm_rootdir = _get_llvm_rootdir(self)
                 end
-                if llvm_rootdir then
-                    local libdir = path.absolute(path.join(llvm_rootdir, "lib"))
-                    maps["c++_static"] = table.join(maps["c++_static"], "-L" .. libdir)
-                    maps["c++_shared"] = table.join(maps["c++_shared"], "-L" .. libdir)
-                    -- sometimes llvm runtimes are located in a target-triple subfolder
-                    local target_triple = _get_llvm_target_triple(self)
-                    local triple_libdir = (target_triple and os.isdir(path.join(libdir, target_triple))) and path.join(libdir, target_triple)
+
+                local target = opt.target
+                if target and target:type() == "target" then
+                    -- add rpath to avoid the user need to set LD_LIBRARY_PATH by hand
+                    maps["c++_shared"] = table.join(maps["c++_shared"], nf_rpathdir(self, libdir))
                     if triple_libdir then
-                        maps["c++_static"] = table.join(maps["c++_static"], "-L" .. triple_libdir)
-                        maps["c++_shared"] = table.join(maps["c++_shared"], "-L" .. triple_libdir)
+                        maps["c++_shared"] = table.join(maps["c++_shared"], nf_rpathdir(self, triple_libdir))
                     end
                     -- add rpath to avoid the user need to set LD_LIBRARY_PATH by hand
                     maps["c++_shared"] = table.join(maps["c++_shared"], nf_rpathdir(self, libdir))
@@ -300,10 +297,10 @@ function nf_runtime(self, runtime, opt)
                         maps["c++_shared"] = table.join(maps["c++_shared"], "@rpath/" .. target:filename())
                     end
                 end
-                if runtime:endswith("_static") and _has_static_libstdcxx(self) then
-                    maps["c++_static"] = table.join(maps["c++_static"], "-static-libstdc++")
-                    maps["stdc++_static"] = table.join(maps["stdc++_static"], "-static-libstdc++")
-                end
+            end
+            if runtime:endswith("_static") and _has_static_libstdcxx(self) then
+                maps["c++_static"] = table.join(maps["c++_static"], "-static-libstdc++")
+                maps["stdc++_static"] = table.join(maps["stdc++_static"], "-static-libstdc++")
             end
         end
     end

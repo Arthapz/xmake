@@ -304,6 +304,12 @@ function buildenvs(package, opt)
         table.join2(cxxflags, package:_generate_lto_configs("cxx").cxxflags)
         table.join2(ldflags, package:_generate_lto_configs().ldflags)
     end
+    local runtimes = package:config("runtimes")
+    if runtimes then
+        table.join2(cxxflags, _map_compflags(package, "cxx", "runtime", runtimes))
+        table.join2(ldflags, _map_linkflags(package, "binary", {"cxx"}, "runtime", runtimes))
+        table.join2(shflags, _map_linkflags(package, "shared", {"cxx"}, "runtime", runtimes))
+    end
     if package:config("asan") then
         table.join2(cflags, package:_generate_sanitizer_configs("address", "cc").cflags)
         table.join2(cxxflags, package:_generate_sanitizer_configs("address", "cxx").cxxflags)
