@@ -242,16 +242,13 @@ function builder:_add_flags_from_target(flags, target)
 
     -- only for target and option
     local target_type = target:type()
-    if target_type ~= "target" and target_type ~= "option" then
-        return
-    end
 
     -- init cache
     self._TARGETFLAGS = self._TARGETFLAGS or {}
     local cache = self._TARGETFLAGS
 
     -- get flags from cache first
-    local key = target:cachekey()
+    local key = target_type == "package" and tostring(target) or target:cachekey()
     local targetflags = cache[key]
     if not targetflags then
 
@@ -417,6 +414,7 @@ function builder:_add_flags_from_language(flags, opt)
     -- get order named items
     local items = {}
     local target = opt.target
+
     for _, flaginfo in ipairs(self:_nameflags()) do
 
         -- get flag info
@@ -429,7 +427,6 @@ function builder:_add_flags_from_language(flags, opt)
                 checkstate = false
             end
         end
-
         -- get api name of tool
         local apiname  = flagname:gsub("^nf_", "")
 
@@ -453,10 +450,21 @@ function builder:_add_flags_from_language(flags, opt)
                     opt_.getter = getter
                     self:_add_items_from_getter(items, flagname, opt_)
                 end
-            elseif flagscope == "target" and target and target:type() == "target" then
-                self:_add_items_from_target(items, flagname, opt_)
-            elseif flagscope == "target" and target and target:type() == "option" then
-                self:_add_items_from_option(items, flagname, opt_)
+            elseif flagscope == "target" and target then 
+                if target:type() == "target" then
+                    self:_add_items_from_target(items, flagname, opt_)
+                elseif target:type() == "option" then
+                    self:_add_items_from_option(items, flagname, opt_)
+                elseif target:type() == "package" then
+                    if apiname == "runtime" then
+                        table.insert(items, {
+                            name = "runtime",
+                            values = table.wrap(target:runtimes()),
+                            check = checkstate,
+                            multival = multival,
+                            mapper = mapper})
+                    end
+                end
             elseif flagscope == "config" then
                 self:_add_items_from_config(items, flagname, opt_)
             elseif flagscope == "toolchain" then

@@ -269,7 +269,7 @@ function nf_runtime(self, runtime, opt)
             end
         elseif kind == "ld" or kind == "sh" then
             local target = opt.target
-            if target and target.sourcekinds and table.contains(table.wrap(target:sourcekinds()), "cxx") then
+            if target then
                 maps["c++_static"]    = "-stdlib=libc++"
                 maps["c++_shared"]    = "-stdlib=libc++"
                 maps["stdc++_static"] = "-stdlib=libstdc++"
@@ -290,14 +290,17 @@ function nf_runtime(self, runtime, opt)
                         maps["c++_static"] = table.join(maps["c++_static"], "-L" .. triple_libdir)
                         maps["c++_shared"] = table.join(maps["c++_shared"], "-L" .. triple_libdir)
                     end
-                    -- add rpath to avoid the user need to set LD_LIBRARY_PATH by hand
-                    maps["c++_shared"] = table.join(maps["c++_shared"], nf_rpathdir(self, libdir))
-                    if triple_libdir then
-                        maps["c++_shared"] = table.join(maps["c++_shared"], nf_rpathdir(self, triple_libdir))
-                    end
-                    if target:is_shared() and self:is_plat("macosx", "iphoneos", "watchos") then
-                        maps["c++_shared"] = table.join(maps["c++_shared"], "-install_name")
-                        maps["c++_shared"] = table.join(maps["c++_shared"], "@rpath/" .. target:filename())
+
+                    if target:type() == "target" then
+                        -- add rpath to avoid the user need to set LD_LIBRARY_PATH by hand
+                        maps["c++_shared"] = table.join(maps["c++_shared"], nf_rpathdir(self, libdir))
+                        if triple_libdir then
+                            maps["c++_shared"] = table.join(maps["c++_shared"], nf_rpathdir(self, triple_libdir))
+                        end
+                        if target:is_shared() and self:is_plat("macosx", "iphoneos", "watchos") then
+                            maps["c++_shared"] = table.join(maps["c++_shared"], "-install_name")
+                            maps["c++_shared"] = table.join(maps["c++_shared"], "@rpath/" .. target:filename())
+                        end
                     end
                 end
                 if runtime:endswith("_static") and _has_static_libstdcxx(self) then
