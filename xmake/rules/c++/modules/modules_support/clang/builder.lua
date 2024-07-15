@@ -177,6 +177,14 @@ function populate_module_map(target, modules)
             add_module_to_target_mapper(target, name, cppfile, bmifile, {deps = module.requires, namedmodule = support_namedmodule})
         end
     end
+
+    -- gen module map for clangd
+    local mapper = get_target_module_mapper(target)
+    local maplines = ""
+    for name, module in pairs(mapper) do
+         maplines = maplines .. name .. " " .. (not path.is_absolute(module.sourcefile) and path.absolute(module.sourcefile) or module.sourcefile) .. "\n"
+    end
+    io.writefile(path.join("$(buildir)", "clangd_mapper.txt"), maplines, {encoding = "binary"})
 end
 
 -- get defines for a module
