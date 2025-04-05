@@ -38,143 +38,16 @@ rule("c++.build.modules.builder")
 
     -- parallel build support to accelerate `xmake build` to build modules
     before_build_files(function(target, batchjobs, sourcebatch, opt)
-        if target:data("cxx.has_modules") then
-            import("support")
-            import("scanner")
-            import("builder")
-
-            -- add target deps modules
-            if target:orderdeps() then
-                local deps_sourcefiles = scanner.get_targetdeps_modules(target)
-                if deps_sourcefiles then
-                    table.join2(sourcebatch.sourcefiles, deps_sourcefiles)
-                end
-            end
-
-            -- append std module
-            local std_modules = support.get_stdmodules(target)
-            if std_modules then
-                table.join2(sourcebatch.sourcefiles, std_modules)
-            end
-
-            -- extract packages modules dependencies
-            local package_modules_data = scanner.get_all_packages_modules(target, opt)
-            if package_modules_data then
-                -- append to sourcebatch
-                for _, package_module_data in table.orderpairs(package_modules_data) do
-                    table.insert(sourcebatch.sourcefiles, package_module_data.file)
-                    target:fileconfig_set(package_module_data.file, {external = package_module_data.external, defines = package_module_data.metadata.defines})
-                end
-            end
-
-            opt = opt or {}
-            opt.batchjobs = true
-
-            support.patch_sourcebatch(target, sourcebatch, opt)
-            local modules = scanner.get_module_dependencies(target, sourcebatch, opt)
-
-            if not target:is_moduleonly() then
-                -- avoid building non referenced modules
-                local build_objectfiles, link_objectfiles = scanner.sort_modules_by_dependencies(target, sourcebatch.objectfiles, modules)
-                sourcebatch.objectfiles = build_objectfiles
-
-                -- build modules
-                builder.build_modules_for_batchjobs(target, batchjobs, sourcebatch, modules, opt)
-
-                -- build headerunits and we need to do it before building modules
-                builder.build_headerunits_for_batchjobs(target, batchjobs, sourcebatch, modules, opt)
-
-                sourcebatch.objectfiles = link_objectfiles
-            else
-                sourcebatch.objectfiles = {}
-            end
-
-            support.localcache():set2(target:name(), "c++.modules", modules)
-            support.localcache():save()
-        else
-            -- avoid duplicate linking of object files of non-module programs
-            sourcebatch.objectfiles = {}
-        end
+        import("builder")(target, batchjobs, sourcebatch, table.join(opt or {}, {batchjobs = true}))
     end, {batch = true})
 
     -- serial compilation only, usually used to support project generator
     before_buildcmd_files(function(target, batchcmds, sourcebatch, opt)
-        if target:data("cxx.has_modules") then
-            import("support")
-            import("scanner")
-            import("builder")
-
-            -- add target deps modules
-            if target:orderdeps() then
-                local deps_sourcefiles = scanner.get_targetdeps_modules(target)
-                if deps_sourcefiles then
-                    table.join2(sourcebatch.sourcefiles, deps_sourcefiles)
-                end
-            end
-
-            -- append std module
-            local std_modules = support.get_stdmodules(target)
-            if std_modules then
-                table.join2(sourcebatch.sourcefiles, std_modules)
-            end
-
-            -- extract packages modules dependencies
-            local package_modules_data = scanner.get_all_packages_modules(target, opt)
-            if package_modules_data then
-                -- append to sourcebatch
-                for _, package_module_data in table.orderpairs(package_modules_data) do
-                    table.insert(sourcebatch.sourcefiles, package_module_data.file)
-                    target:fileconfig_set(package_module_data.file, {external = package_module_data.external, defines = package_module_data.metadata.defines})
-                end
-            end
-
-            opt = opt or {}
-            opt.batchjobs = false
-
-            support.patch_sourcebatch(target, sourcebatch, opt)
-            local modules = scanner.get_module_dependencies(target, sourcebatch, opt)
-
-            if not target:is_moduleonly() then
-                -- avoid building non referenced modules
-                local build_objectfiles, link_objectfiles = scanner.sort_modules_by_dependencies(target, sourcebatch.objectfiles, modules)
-                sourcebatch.objectfiles = build_objectfiles
-
-                -- build headerunits
-                builder.build_headerunits_for_batchcmds(target, batchcmds, sourcebatch, modules, opt)
-
-                -- build modules
-                builder.build_modules_for_batchcmds(target, batchcmds, sourcebatch, modules, opt)
-
-                sourcebatch.objectfiles = link_objectfiles
-            else
-                -- avoid duplicate linking of object files of non-module programs
-                sourcebatch.objectfiles = {}
-            end
-
-            support.localcache():set2(target:name(), "c++.modules", modules)
-            support.localcache():save()
-        else
-            sourcebatch.sourcefiles = {}
-            sourcebatch.objectfiles = {}
-            sourcebatch.dependfiles = {}
-        end
+        import("builder")(target, batchcmds, sourcebatch, table.join(opt or {}, {batchjobs = false}))
     end)
 
     after_clean(function (target)
-        import("core.base.option")
-        import("support")
-        import("private.action.clean.remove_files")
-
-        -- we cannot use target:data("cxx.has_modules"),
-        -- because on_config will be not called when cleaning targets
-        if support.contains_modules(target) then
-            remove_files(support.modules_cachedir(target))
-            if option.get("all") then
-                remove_files(support.stlmodules_cachedir(target))
-                support.localcache():clear()
-                support.localcache():save()
-            end
-        end
+        import("builder").clean(target)
     end)
 
 -- install modules
@@ -182,22 +55,9 @@ rule("c++.build.modules.install")
     set_extensions(".mpp", ".mxx", ".cppm", ".ixx")
 
     before_install(function (target)
-        import("support")
-        import("builder")
-
-        -- we cannot use target:data("cxx.has_modules"),
-        -- because on_config will be not called when installing targets
-        if support.contains_modules(target) then
-            local modules = support.localcache():get2(target:name(), "c++.modules")
-            builder.generate_metadata(target, modules)
-
-            support.add_installfiles_for_modules(target)
-        end
+        import("install").install(target)
     end)
 
     before_uninstall(function (target)
-        import("support")
-        if support.contains_modules(target) then
-            support.add_installfiles_for_modules(target)
-        end
+        import("install").uninstall(target)
     end)

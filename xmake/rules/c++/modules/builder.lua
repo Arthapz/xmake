@@ -20,10 +20,12 @@
 
 -- imports
 import("core.base.json")
+import("core.base.bytes")
 import("core.base.option")
 import("core.base.hashset")
 import("async.runjobs")
 import("private.async.buildjobs")
+import("private.action.clean.remove_files")
 import("core.tool.compiler")
 import("core.project.config")
 import("core.project.depend")
@@ -480,4 +482,79 @@ function is_dependencies_changed(target, module)
         end
     end
     return requires, changed
+end
+
+function clean(target)
+    -- we cannot use target:data("cxx.has_modules"),
+    -- because on_config will be not called when cleaning targets
+    if support.contains_modules(target) then
+        remove_files(support.modules_cachedir(target))
+        if option.get("all") then
+            remove_files(support.stlmodules_cachedir(target))
+            support.localcache():clear()
+            support.localcache():save()
+        end
+    end
+end
+
+function main(target, batch, sourcebatch, opt)
+
+    if target:data("cxx.has_modules") then
+        -- append std module
+        local std_modules = support.get_stdmodules(target)
+        if std_modules then
+            table.join2(sourcebatch.sourcefiles, std_modules)
+        end
+
+        -- add target deps modules
+        local deps_sourcefiles
+        if target:orderdeps() then
+            deps_sourcefiles = scanner.get_targetdeps_modules(target)
+        end
+
+        -- extract packages modules dependencies
+        deps_sourcefiles = table.join(deps_sourcefiles or {}, scanner.get_all_packages_modules(target) or {})
+        -- print(deps_sourcefiles)
+        -- append to sourcebatch
+        for _, sourcefile_data in ipairs(deps_sourcefiles) do
+            table.insert(sourcebatch.sourcefiles, sourcefile_data.file)
+            target:fileconfig_add(sourcefile_data.file, {external = sourcefile_data.external})
+        end
+
+        support.patch_sourcebatch(target, sourcebatch, opt)
+        local modules = scanner.get_module_dependencies(target, sourcebatch, opt)
+
+        if not target:is_moduleonly() then
+            -- avoid building non referenced modules
+            local built_modules, built_headerunits, objectfiles = scanner.sort_modules_by_dependencies(target, modules)
+            sourcebatch.objectfiles = objectfiles
+
+            -- feed module mapper
+            feed_module_mapper(target, modules, built_modules, built_headerunits)
+
+            if opt.batchjobs then
+            -- build headerunits
+                build_headerunits_for_batchjobs(target, batch, modules, built_headerunits, opt)
+
+                -- build modules
+                build_modules_for_batchjobs(target, batch, modules, built_modules, opt)
+            else
+                -- build headerunits
+                build_headerunits_for_batchcmds(target, batch, modules, built_headerunits, opt)
+
+                -- build modules
+                build_modules_for_batchcmds(target, batch, modules, built_modules, opt)
+            end
+        else
+            -- avoid duplicate linking of object files of non-module programs
+            sourcebatch.objectfiles = {}
+        end
+
+        support.localcache():set2(target:name(), "c++.modules", modules)
+        support.localcache():save()
+    else
+        sourcebatch.sourcefiles = {}
+        sourcebatch.objectfiles = {}
+        sourcebatch.dependfiles = {}
+    end
 end
