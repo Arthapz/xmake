@@ -242,33 +242,28 @@ function build_modules_for_batchjobs(target, batchjobs, modules, built_modules, 
     opt.rootjob = batchjobs:group_leave() or opt.rootjob
     batchjobs:group_enter(target:name() .. "/build_cxxmodules", {rootjob = opt.rootjob})
 
-    -- add populate module job
-    local modulesjobs = {}
-    local populate_jobname = target:name() .. "_populate_module_map"
-    modulesjobs[populate_jobname] = {
-        name = populate_jobname,
-        job = batchjobs:newjob(populate_jobname, function(_, _)
-            _try_reuse_modules(target, modules)
-            _builder(target).populate_module_map(target, modules)
-        end)
-    }
+    local built_modules_set = hashset.from(built_modules)
 
     -- add module jobs
-    -- for _, sourcefile in ipairs(built_modules) do
-    --     local module = modules[sourcefile]
+    local builder = _builder(target)
 
-    --     opt.build_module(module, sourcefile, get_from_target_mapper(target, module.name).objectfile)
-    -- end
-    -- _build_modules(target, modules built_modules, table.join(opt, {
-    --    build_module = function(module, sourcefile, objectfile)
-    --     local job_name = name and target:name() .. name or sourcefile
-    --     modulesjobs[job_name] = _builder(target).make_module_buildjobs(target, batchjobs, job_name, deps,
-    --         {module = module, objectfile = objectfile, cppfile = cppfile})
-    --   end
-    -- }))
+    local jobs
+    for _, sourcefile in ipairs(built_modules) do
+        jobs = jobs or {}
+        local module = modules[sourcefile]
 
-    -- build batchjobs for modules
-    build_batchjobs_for_modules(modulesjobs, batchjobs, opt.rootjob)
+        local job_name = sourcefile
+        local deps = {}
+        for dep_name, dep in pairs(module.deps) do
+            local dep_module = get_from_target_mapper(target, dep_name)
+            if dep.headerunit or built_modules_set:has(dep_module.sourcefile) then
+                table.insert(deps, dep_module.sourcefile or dep.sourcefile)
+            end
+        end
+        jobs[job_name] = builder.make_module_buildjobs(target, batchjobs, job_name, module, deps, opt)
+    end
+
+    return jobs
 end
 
 -- build modules for batchcmds
@@ -290,10 +285,10 @@ function build_modules_for_batchcmds(target, batchcmds, modules, built_modules, 
 end
 
 -- generate headerunits for batchjobs
-function build_headerunits_for_batchjobs(target, batchjobs, sourcebatch, modules, opt)
+function build_headerunits_for_batchjobs(target, batchjobs, modules, built_headerunits, opt)
 
-    local user_headerunits, stl_headerunits = scanner.get_headerunits(target, sourcebatch, modules)
-    if not user_headerunits and not stl_headerunits then
+    local headerunits, stl_headerunits = scanner.sort_headerunits(modules, built_headerunits)
+    if not headerunits and not stl_headerunits then
        return
     end
 
@@ -302,29 +297,29 @@ function build_headerunits_for_batchjobs(target, batchjobs, sourcebatch, modules
     opt.rootjob = batchjobs:group_leave() or opt.rootjob
     batchjobs:group_enter(target:name() .. "/build_headerunits", {rootjob = opt.rootjob})
 
-    local build_headerunits = function(headerunits)
-        local modulesjobs = {}
-        _build_headerunits(target, headerunits, table.join(opt, {
-            build_headerunit = function(headerunit, key, bmifile, outputdir, build)
-                local job_name = target:name() .. key
-                local job = _builder(target).make_headerunit_buildjobs(target, job_name, batchjobs, headerunit, bmifile, outputdir, table.join(opt, {build = build}))
-                if job then
-                  modulesjobs[job_name] = job
-                end
-            end
-        }))
-        build_batchjobs_for_modules(modulesjobs, batchjobs, opt.rootjob)
+    local builder = _builder(target)
+    local jobs = {}
+    -- build stl header units first as other headerunits may need them
+    opt.stl_headerunit = true
+    for _, headerfile in ipairs(stl_headerunits) do
+        local headerunit = modules[headerfile]
+        local job_name = headerunit.sourcefile
+        local job = builder.make_headerunit_buildjobs(target, job_name, batchjobs, headerunit, opt)
+        if job then
+          jobs[job_name] = job
+        end
+    end
+    opt.stl_headerunit = false
+    for _, headerfile in ipairs(headerunits) do
+        local headerunit = modules[headerfile]
+        local job_name = headerunit.sourcefile
+        local job = builder.make_headerunit_buildjobs(target, job_name, batchjobs, headerunit, opt)
+        if job then
+          jobs[job_name] = job
+        end
     end
 
-    -- build stl header units first as other headerunits may need them
-    if stl_headerunits then
-        opt.stl_headerunit = true
-        build_headerunits(stl_headerunits)
-    end
-    if user_headerunits then
-        opt.stl_headerunit = false
-        build_headerunits(user_headerunits)
-    end
+    return jobs
 end
 
 -- generate headerunits for batchcmds
@@ -406,43 +401,32 @@ end
 
 -- feed the module mapper
 function feed_module_mapper(target, modules, built_modules, built_headerunits)
-    local built_set = hashset.from(table.join(built_modules or {}, built_headerunits or {}))
-    -- insert dependencies mappers
-    local mapper, keys = get_target_module_mapper(target)
-    for _, dep in ipairs(target:orderdeps()) do
-        local dep_mapper = get_target_module_mapper(dep)
-        if dep_mapper then
-            table.join2(mapper, dep_mapper)
-        end
-    end
 
-    -- feed modules map
+    local mapper, keys = get_target_module_mapper(target)
     local compinst = target:compiler("cxx")
     for sourcefile, module in pairs(modules) do
-        if built_set:has(sourcefile) then
-            local fileconfig = target:fileconfig(sourcefile)
-            local flags
-            if fileconfig and fileconfig.external then
-                flags = fileconfig.external.flags
+        local fileconfig = target:fileconfig(sourcefile)
+        local flags
+        if fileconfig and fileconfig.external then
+            flags = fileconfig.external.flags
+        end
+        if module.headerunit then
+            flags = flags or support.strip_flags(target, compinst:compflags({sourcefile = sourcefile, target = target, sourcekind = "cxx"}))
+            local key = support.get_headerunit_key(target, sourcefile, {flags = flags})
+            if not keys:has(key) then
+                mapper[key] = {name = module.name, bmifile = module.bmifile, sourcefile = module.sourcefile, method = module.method, key = key}
+                _invalidate_mapper_keys(target)
             end
-            if module.headerunit then
-                flags = flags or support.strip_flags(target, compinst:compflags({sourcefile = sourcefile, target = target, sourcekind = "cxx"}))
-                local key = support.get_headerunit_key(target, sourcefile, {flags = flags})
-                if not keys:has(key) then
-                    mapper[key] = {name = module.name, bmifile = module.bmifile, sourcefile = module.sourcefile, method = module.method, key = key}
-                    _invalidate_mapper_keys(target)
-                end
-                mapper[module.name] = mapper[module.name] or {}
-                mapper[module.name].alias_of = mapper[module.name].alias_of or {}
-                mapper[module.name].alias_of[key] = mapper[key]
-                for _, alias in ipairs(module.aliases) do
-                    mapper[alias] = {alias_of = mapper[key]}
-                    mapper[alias].alias_of[key] = mapper[key]
-                end
-            elseif module.interface or module.implementation then
-                if not keys[module.name] then
-                    mapper[module.name] = {name = module.name, bmifile = module.bmifile, sourcefile = module.sourcefile, deps = module.deps, flags = flags}
-                end
+            mapper[module.name] = mapper[module.name] or {}
+            mapper[module.name].alias_of = mapper[module.name].alias_of or {}
+            mapper[module.name].alias_of[key] = mapper[key]
+            for _, alias in ipairs(module.aliases) do
+                mapper[alias] = {alias_of = mapper[key]}
+                mapper[alias].alias_of[key] = mapper[key]
+            end
+        elseif module.interface or module.implementation then
+            if not keys[module.name] then
+                mapper[module.name] = {name = module.name, bmifile = module.bmifile, sourcefile = module.sourcefile, deps = module.deps, flags = flags}
             end
         end
     end
@@ -536,10 +520,12 @@ function main(target, batch, sourcebatch, opt)
 
             if opt.batchjobs then
             -- build headerunits
-                build_headerunits_for_batchjobs(target, batch, modules, built_headerunits, opt)
+                local jobs = build_headerunits_for_batchjobs(target, batch, modules, built_headerunits, opt)
 
                 -- build modules
-                build_modules_for_batchjobs(target, batch, modules, built_modules, opt)
+                jobs = table.join(build_modules_for_batchjobs(target, batch, modules, built_modules, opt) or {}, jobs or {})
+
+                build_batchjobs_for_modules(jobs, batch, opt.rootjob)
             else
                 -- build headerunits
                 build_headerunits_for_batchcmds(target, batch, modules, built_headerunits, opt)

@@ -164,68 +164,55 @@ function get_module_required_defines(target, sourcefile)
 end
 
 -- build module file for batchjobs
-function make_module_buildjobs(target, batchjobs, job_name, deps, opt)
+function make_module_buildjobs(target, batchjobs, job_name, module, deps, opt)
 
-    local name, provide, _ = support.get_provided_module(opt.module)
-    local bmifile = provide and support.get_bmi_path(provide.bmi)
     local module_mapperflag = support.get_modulemapperflag(target)
+    local module_onlyflag = support.get_moduleonlyflag(target)
+    local module_flag = support.get_modulesflag(target)
 
     return {
         name = job_name,
-        deps = table.join(target:name() .. "_populate_module_map", deps),
+        deps = deps,
         sourcefile = opt.cppfile,
-        job = batchjobs:newjob(name or opt.cppfile, function(_, _, jobopt)
-            local mapped_bmi
-            if provide or support.memcache():get2(target:name() .. name, "reuse") then
-                mapped_bmi = get_from_target_mapper(target, name).bmi
+        job = batchjobs:newjob(module.name or module.sourcefile, function(_, _, jobopt)
+            local module_mapper
+            if module.implementation or module.interface or module.deps then
+                module_mapper = _get_modulemapper_file(module)
+                target:fileconfig_add(module.sourcefile, {force = {cxxflags = {module_mapperflag .. module_mapper}}})
             end
 
             -- generate and append module mapper file
-            local module_mapper
-            if provide or opt.module.requires then
-                module_mapper = _generate_modulemapper_file(target, opt.module, path.directory(opt.cppfile))
-            end
-
-            local dependfile = target:dependfile(bmifile or opt.objectfile)
-            local build, dependinfo = should_build(target, opt.cppfile, bmifile, {name = name, objectfile = opt.objectfile, requires = opt.module.requires})
+            local build = should_build(target, module)
 
             -- needed to detect rebuild of dependencies
-            if provide and build then
-                mark_build(target, key)
-            end
-
             if build then
-                -- compile if it's a named module
-                if provide or support.has_module_extension(opt.cppfile) then
-                    local module_onlyflag = support.get_moduleonlyflag(target)
-                    local fileconfig = target:fileconfig(opt.cppfile)
-                    local external = fileconfig and fileconfig.external
-                    local from_moduleonly = external and external.moduleonly
+                if module.implementation or module.interface or module.deps then
+                    _generate_modulemapper_file(target, module)
+                end
 
-                    local build_bmi = not mapped_bmi
-                    local build_objectfile = from_moduleonly or not external
-
+                if option.get("diagnosis") then
+                    if module.name  then
+                        print("mapper file for %s (%s) --------\n%s--------", module.name, module.sourcefile, io.readfile(module_mapper))
+                    else
+                        print("mapper file for %s --------\n%s--------", module.sourcefile, io.readfile(module_mapper))
+                    end
+                end
+                if support.has_module_extension(module.sourcefile) then
+                    os.mkdir(path.directory(module.objectfile))
                     local flags = {"-x", "c++", module_mapperflag .. module_mapper}
-                    local sourcefile
-                    if build_bmi and build_objectfile then
-                        progress.show(jobopt.progress, "${color.build.target}<%s> ${clear}${color.build.object}compiling.module.$(mode) %s", target:name(), name or opt.cppfile)
-                        sourcefile = opt.cppfile
-                    elseif build_bmi and module_onlyflag then
-                        progress.show(jobopt.progress, "${color.build.target}<%s> ${clear}${color.build.object}compiling.bmi.$(mode) %s", target:name(), name or opt.cppfile)
+                    local fileconfig = target:fileconfig(module.sourcefile)
+                    local external = fileconfig and fileconfig.external
+                    if external and not external.reuse and not external.moduleonly then
+                        progress.show(jobopt.progress, "${color.build.target}<%s> ${clear}${color.build.object}compiling.module.bmi.$(mode) %s", target:name(), module.name or module.sourcefile)
                         table.insert(flags, module_onlyflag)
-                        sourcefile = opt.cppfile
+                        table.insert(flags, module_flag)
+                    else
+                        progress.show(jobopt.progress, "${color.build.target}<%s> ${clear}${color.build.object}compiling.module.$(mode) %s", target:name(), module.name or module.sourcefile)
                     end
-
-                    -- if option.get("diagnosis") then
-                    --     print("mapper file --------\n%s--------", io.readfile(module_mapper))
-                    -- end
-                    if sourcefile then
-                        _compile(target, flags, sourcefile, opt.objectfile)
-                    end
+                    _compile(target, flags, module.sourcefile, module.objectfile)
                     os.tryrm(module_mapper)
                 else
-                    target:fileconfig_add(opt.cppfile, {force = {cxxflags = {module_mapperflag .. module_mapper}}})
-                    -- os.tryrm(objectfile) -- force rebuild for .cpp files
+                    os.tryrm(module.objectfile) -- force rebuild for .cpp files
                 end
             end
         end)}
@@ -283,46 +270,30 @@ function make_module_buildcmds(target, batchcmds, module, opt)
 end
 
 -- build headerunit file for batchjobs
-function make_headerunit_buildjobs(target, job_name, batchjobs, headerunit, bmifile, outputdir, opt)
+function make_headerunit_buildjobs(target, job_name, batchjobs, headerunit, opt)
+    local opt = table.clone(opt)
 
-    local _headerunit = headerunit
-    _headerunit.path = headerunit.method == ":quote" and path.relative(headerunit.path) or headerunit.path
-    local already_exists = add_headerunit_to_target_mapper(target, _headerunit, bmifile)
-    if not already_exists then
-        return {
-            name = job_name,
-            sourcefile = headerunit.path,
-            job = batchjobs:newjob(job_name, function(_, _, jobopt)
-                if not os.isdir(outputdir) then
-                    os.mkdir(outputdir)
+    return {
+        name = job_name,
+        sourcefile = headerunit.path,
+        job = batchjobs:newjob(job_name, function(_, _, jobopt)
+            -- local compinst = compiler.load("cxx", {target = target})
+            -- local compflags = compinst:compflags({sourcefile = headerunit.sourcefile, target = target, sourcekind = "cxx"})
+
+            local build = should_build(target, headerunit)
+            if build then
+                local headerunit_mapper = _generate_headerunit_modulemapper_file(headerunit)
+                local name = headerunit.unique and path.filename(headerunit.name) or headerunit.name
+                if option.get("diagnosis") then
+                    print("mapper file for %s (%s) --------\n%s--------", name, headerunit_mapper, io.readfile(headerunit_mapper))
                 end
-
-                local compinst = compiler.load("cxx", {target = target})
-                local compflags = compinst:compflags({sourcefile = headerunit.path, target = target})
-
-                local dependfile = target:dependfile(bmifile)
-                local dependinfo = depend.load(dependfile) or {}
-                dependinfo.files = {}
-                local depvalues = {compinst:program(), compflags}
-
-                if opt.build then
-                    local headerunit_mapper = _generate_headerunit_modulemapper_file({name = path.normalize(headerunit.path), bmifile = bmifile})
-                    local name = headerunit.unique and headerunit.name or headerunit.path
-                    progress.show(jobopt.progress, "${color.build.target}<%s> ${clear}${color.build.object}compiling.headerunit.$(mode) %s", target:name(), name)
-                    if option.get("diagnosis") then
-                        print("mapper file %s --------\n%s--------", headerunit_mapper, io.readfile(headerunit_mapper))
-                    end
-                    _compile(target,
-                        _make_headerunitflags(target, headerunit, headerunit_mapper, opt),
-                        opt.stl_headerunit and headerunit.name or path.translate(headerunit.sourcefile), bmifile)
-                    os.tryrm(headerunit_mapper)
-                end
-
-                table.insert(dependinfo.files, headerunit.path)
-                dependinfo.values = depvalues
-                depend.save(dependinfo, dependfile)
-            end)}
-    end
+                progress.show(jobopt.progress, "${color.build.target}<%s> ${clear}${color.build.object}compiling.headerunit.$(mode) %s", target:name(), name)
+                _compile(target,
+                         _make_headerunitflags(target, headerunit, headerunit_mapper, opt),
+                         opt.stl_headerunit and headerunit.name or path.translate(headerunit.sourcefile), headerunit.bmifile)
+                os.tryrm(headerunit_mapper)
+            end
+        end)}
 end
 
 -- build headerunit file for batchcmds

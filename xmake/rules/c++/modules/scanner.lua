@@ -256,6 +256,7 @@ function _generate_dependencies(target, sourcebatch, opt)
     else
        opt.progress = 0
     end
+    local threshold = #sourcebatch.sourcefiles
     if opt.batchjobs then
         local jobs = option.get("jobs") or os.default_njob()
         runjobs(target:name() .. "_module_scanner", function(index)
@@ -264,7 +265,6 @@ function _generate_dependencies(target, sourcebatch, opt)
             opt.progress = opt.progress + threshold
         end, {comax = jobs, total = #sourcebatch.sourcefiles})
     else
-        local threshold = #sourcebatch.sourcefiles
         for _, sourcefile in ipairs(sourcebatch.sourcefiles) do
             changed = _scanner(target).generate_dependency_for(target, sourcefile, opt) or changed
             opt.progress = opt.progress + threshold
@@ -594,7 +594,6 @@ function sort_modules_by_dependencies(target, modules)
         end
     end
     table.sort(objectfiles)
-    print(objectfiles)
     return built_modules, table.unique(built_headerunits), objectfiles
 end
 
