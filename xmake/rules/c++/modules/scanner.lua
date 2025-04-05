@@ -46,7 +46,7 @@ function _scanner(target)
     return scanner
 end
 
-function _parse_meta_info(target, metafile)
+function _parse_meta_info(metafile)
     local metadata = json.loadfile(metafile)
     if metadata.file and metadata.name then
         return metadata.file, metadata.name, metadata
@@ -75,6 +75,11 @@ function _parse_meta_info(target, metafile)
     return filename, name, metadata
 end
 
+function _get_headerunit_bmifile(target, headerfile, key)
+    local outputdir = support.get_outputdir(target, headerfile, {headerunit = true, key = key})
+    return path.join(outputdir, path.filename(headerfile) .. support.get_bmi_extension(target))
+end
+
 -- parse module dependency data
 --[[
 {
@@ -88,7 +93,7 @@ end
     },
     provides = {
       hello = {
-        bmi = "build/.gens/stl_headerunit/linux/x86_64/release/rules/modules/cache/hello.gcm",
+        bmifile = "build/.gens/stl_headerunit/linux/x86_64/release/rules/modules/cache/hello.gcm",
         sourcefile = "src/hello.mpp"
       }
     }
@@ -108,65 +113,68 @@ function _parse_dependencies_data(target, moduleinfos)
     for _, moduleinfo in ipairs(moduleinfos) do
         assert(moduleinfo.version <= 1)
         for _, rule in ipairs(moduleinfo.rules) do
-            modules = modules or {}
-            local m = {}
-            if rule.provides then
-                for _, provide in ipairs(rule.provides) do
-                    m.provides = m.provides or {}
-                    assert(provide["logical-name"])
-                    local bmifile = provide["compiled-module-path"]
-                    -- try to find the compiled module path in outputs filed (MSVC doesn't generate compiled-module-path)
-                    if not bmifile then
-                        for _, output in ipairs(rule.outputs) do
-                            if output:endswith(support.get_bmi_extension(target)) then
-                                bmifile = output
-                                break
-                            end
-                        end
-
-                        -- we didn't found the compiled module path, so we assume it
-                        if not bmifile then
-                            local name = provide["logical-name"] .. support.get_bmi_extension(target)
-                            -- partition ":" character is invalid path character on windows
-                            -- @see https://github.com/xmake-io/xmake/issues/2954
-                            name = name:replace(":", "-")
-                            bmifile = path.join(support.get_outputdir(target,  name), name)
-                        end
-                    end
-                    m.provides[provide["logical-name"]] = {
-                        bmi = bmifile,
-                        sourcefile = moduleinfo.sourcefile,
-                        interface = provide["is-interface"]
-                    }
-                end
-            else
-                m.cppfile = moduleinfo.sourcefile
-            end
             assert(rule["primary-output"])
-            modules[path.translate(rule["primary-output"])] = m
-        end
-    end
 
-    for _, moduleinfo in ipairs(moduleinfos) do
-        for _, rule in ipairs(moduleinfo.rules) do
-            local m = modules[path.translate(rule["primary-output"])]
-            for _, r in ipairs(rule.requires) do
-                m.requires = m.requires or {}
-                local p = r["source-path"]
-                if not p then
-                    for _, dependency in pairs(modules) do
-                        if dependency.provides and dependency.provides[r["logical-name"]] then
-                            p = dependency.provides[r["logical-name"]].bmi
-                            break
+            modules = modules or {}
+            local module = {objectfile = path.translate(rule["primary-output"]), sourcefile = moduleinfo.sourcefile}
+            
+            if rule.provides then
+                -- assume rule.provides is always one element on C++
+                -- @see https://www.open-std.org/jtc1/sc22/wg21/docs/papers/2022/p1689r5.html
+                local provide = rule.provides and rule.provides[1]
+                if provide then
+                    assert(provide["logical-name"])
+
+                    module.name = provide["logical-name"]
+                    module.sourcefile = module.sourcefile or path.normalize(provide["source-path"])
+                    module.interface = provide["is-interface"] == nil and true or provide["is-interface"]
+                    module.implementation = not module.interface
+
+                    -- XMake handle bmifile so we don't need rely on compiler-module-path
+                    local fileconfig = target:fileconfig(module.sourcefile)
+                    local flags
+                    local module_target = target
+                    if fileconfig and fileconfig.external then
+                        flags = fileconfig.external.flags
+                        if not fileconfig.external.moduleonly and fileconfig.external.target then
+                            module_target = fileconfig.external.target
+                        end
+                    end
+                    local bmifile = support.get_bmi_path(provide["logical-name"] .. support.get_bmi_extension(target))
+                    module.bmifile = path.join(support.get_outputdir(module_target, moduleinfo.sourcefile, {named = module.interface}), bmifile)
+                    module.flags = flags
+                end
+            end
+
+            if rule.requires then
+                module.deps = {}
+                for _, dep in ipairs(rule.requires) do
+                    local method = dep["lookup-method"] or "by-name"
+                    local name = dep["logical-name"]
+                    module.deps[name] = {
+                        name = name,
+                        method = method,
+                        unique = dep["unique-on-source-path"] or false,
+                    }
+                    if dep["source-path"] then
+                        local sourcefile = path.normalize(dep["source-path"])
+                        module.deps[name].sourcefile = sourcefile
+                        module.deps[name].headerunit = true
+                        -- insert headerunits into modules
+                        if not modules[sourcefile] then
+                            modules[sourcefile] = module.deps[name]
+                            local key = support.get_headerunit_key(target, sourcefile)
+                            modules[sourcefile].bmifile = _get_headerunit_bmifile(target, sourcefile, key)
+                        elseif modules[sourcefile].name ~= name then
+                            modules[sourcefile].aliases = modules[sourcefile].aliases or {}
+                            table.insert(modules[sourcefile].aliases, name)
                         end
                     end
                 end
-                m.requires[r["logical-name"]] = {
-                    method = r["lookup-method"] or "by-name",
-                    path = p and path.translate(p) or nil,
-                    unique = r["unique-on-source-path"] or false
-                }
             end
+
+            assert(module.sourcefile)
+            modules[module.sourcefile] = module
         end
     end
     return modules
@@ -175,26 +183,26 @@ end
 -- generate edges for DAG
 function _get_edges(nodes, modules)
   local edges = {}
-  local module_names = {}
   local name_filemap = {}
-  local named_module_names = hashset.new()
+  local deps_names = hashset.new()
   for _, node in ipairs(table.unique(nodes)) do
       local module = modules[node]
-      local module_name, _, cppfile = support.get_provided_module(module)
-      if module_name then
-          if named_module_names:has(module_name) then
-              raise("duplicate module name detected \"" .. module_name .. "\"\n    -> " .. cppfile .. "\n    -> " .. name_filemap[module_name])
+      if module.interface or module.implementation then
+          if deps_names:has(module.name) then
+              raise("duplicate module name detected \"" .. module.name .. "\"\n    -> " .. module.sourcefile .. "\n    -> " .. name_filemap[module.name])
           end
-          named_module_names:insert(module_name)
-          name_filemap[module_name] = cppfile
+          deps_names:insert(module.name)
+          name_filemap[module.name] = module.sourcefile
+      elseif module.headerunit then
+          deps_names:insert(module.name)
+          name_filemap[module.name] = module.sourcefile
       end
-      if module.requires then
-          for required_name, _ in table.orderpairs(module.requires) do
-              for _, required_node in ipairs(nodes) do
-                  local name, _, _ = support.get_provided_module(modules[required_node])
-                  if name and name == required_name then
-                      table.insert(edges, {required_node, node})
-                  end
+      for dep_name, _ in table.orderpairs(module.deps) do
+          for _, dep_node in ipairs(nodes) do
+              local dep_module = modules[dep_node]
+              if (dep_module.interface or dep_module.implementation or dep_module.headerunit) and dep_name == dep_module.name then
+                  table.insert(edges, {dep_node, node})
+                  break
               end
           end
       end
@@ -202,16 +210,36 @@ function _get_edges(nodes, modules)
   return edges
 end
 
-function _get_package_modules(target, package, opt)
+function _get_package_modules(target, package)
     local package_modules
 
+    local compinst = target:compiler("cxx")
     local modulesdir = path.join(package:installdir(), "modules")
     local metafiles = os.files(path.join(modulesdir, "*", "*.meta-info"))
     for _, metafile in ipairs(metafiles) do
         package_modules = package_modules or {}
-        local modulefile, name, metadata = _parse_meta_info(target, metafile)
+        local modulefile, _, metadata = _parse_meta_info(metafile)
+
+        -- patch flags with include directories
+        local flags = compinst:compflags({target = target, sourcekind = "cxx"}) or {}
+        local is_includeflag = false
+        local includeflags = {}
+        for _, flag in ipairs(flags) do
+            if is_includeflag then
+                table.insert(includeflags, flag)
+                is_includeflag = false
+            elseif flag == "-I" or flag == "-isystem" or flag == "/I" then
+                table.insert(includeflags, flag)
+                is_includeflag = true
+            elseif flag:startswith("-I") or flag:startswith("-isystem") or flag:startswith("/I") then
+                table.insert(includeflags, flag)
+            end
+        end
+        metadata.flags = table.join(metadata.flags, includeflags)
+        
         local moduleonly = not package:libraryfiles()
-        package_modules[name] = {file = path.join(modulesdir, modulefile), metadata = metadata, external = {moduleonly = moduleonly}}
+        table.insert(package_modules, {file = path.join(modulesdir, modulefile),
+                                       external = {flags = metadata.flags, moduleonly = moduleonly}})
     end
 
     return package_modules
@@ -220,15 +248,26 @@ end
 -- generate dependency files
 function _generate_dependencies(target, sourcebatch, opt)
     local changed = false
+    if opt.progress then
+        if type(opt.progress) == "table" then
+            opt.progress = tostring(opt.progress)
+            opt.progress = tonumber(opt.progress:sub(1, -2))
+        end
+    else
+       opt.progress = 0
+    end
     if opt.batchjobs then
         local jobs = option.get("jobs") or os.default_njob()
-        runjobs(target:name() .. "_module_scanner", function(index) 
+        runjobs(target:name() .. "_module_scanner", function(index)
             local sourcefile = sourcebatch.sourcefiles[index]
             changed = _scanner(target).generate_dependency_for(target, sourcefile, opt) or changed
+            opt.progress = opt.progress + threshold
         end, {comax = jobs, total = #sourcebatch.sourcefiles})
     else
+        local threshold = #sourcebatch.sourcefiles
         for _, sourcefile in ipairs(sourcebatch.sourcefiles) do
             changed = _scanner(target).generate_dependency_for(target, sourcefile, opt) or changed
+            opt.progress = opt.progress + threshold
         end
     end
     return changed
@@ -253,31 +292,21 @@ function get_module_dependencies(target, sourcebatch, opt)
 end
 
 -- get headerunits info
-function get_headerunits(target, sourcebatch, modules)
-    local headerunits
+function sort_headerunits(modules, headerunits)
+    local _headerunits
     local stl_headerunits
-    for _, objectfile in ipairs(sourcebatch.objectfiles) do
-        local m = modules[objectfile]
-        if m then
-            for name, r in pairs(m.requires) do
-                if r.method ~= "by-name" then
-                    local unittype = r.method == "include-angle" and ":angle" or ":quote"
-                    if stlheaders.is_stl_header(name) then
-                        stl_headerunits = stl_headerunits or {}
-                        if not table.find_if(stl_headerunits, function(i, v) return v.name == name end) then
-                            table.insert(stl_headerunits, {name = name, path = r.path, type = unittype, unique = r.unique})
-                        end
-                    else
-                        headerunits = headerunits or {}
-                        if not table.find_if(headerunits, function(i, v) return v.name == name end) then
-                            table.insert(headerunits, {name = name, path = r.path, type = unittype, unique = r.unique})
-                        end
-                    end
-                end
-            end
+    for _, headerunit in ipairs(headerunits) do
+        local module = modules[headerunit]
+        assert(module)
+        if stlheaders.is_stl_header(module.name) then
+            stl_headerunits = stl_headerunits or {}
+            table.insert(stl_headerunits, headerunit)
+        else
+            _headerunits = _headerunits or {}
+            table.insert(_headerunits, headerunit)
         end
     end
-    return headerunits, stl_headerunits
+    return _headerunits, stl_headerunits
 end
 
 -- https://www.open-std.org/jtc1/sc22/wg21/docs/papers/2022/p1689r5.html
@@ -368,7 +397,7 @@ function fallback_generate_dependencies(target, jsonfile, sourcefile, preprocess
     end
 
     if module_name_export or internal then
-        local outputdir = support.get_outputdir(target, sourcefile)
+        local outputdir = support.get_outputdir(target, sourcefile, {named = true})
 
         local provide = {}
         provide["logical-name"] = module_name_export or module_name_private
@@ -387,7 +416,7 @@ function fallback_generate_dependencies(target, jsonfile, sourcefile, preprocess
 end
 
 -- extract packages modules dependencies
-function get_all_packages_modules(target, opt)
+function get_all_packages_modules(target)
 
     -- parse all meta-info and append their informations to the package store
     local packages = target:pkgs() or {}
@@ -397,7 +426,7 @@ function get_all_packages_modules(target, opt)
 
     local packages_modules
     for _, package in table.orderpairs(packages) do
-        local package_modules = _get_package_modules(target, package, opt)
+        local package_modules = _get_package_modules(target, package)
         if package_modules then
            packages_modules = packages_modules or {}
            table.join2(packages_modules, package_modules)
@@ -407,79 +436,151 @@ function get_all_packages_modules(target, opt)
 end
 
 -- topological sort
-function sort_modules_by_dependencies(target, objectfiles, modules, opt)
-    local build_objectfiles = {}
-    local link_objectfiles = {}
-    local edges = _get_edges(objectfiles, modules)
+function sort_modules_by_dependencies(target, modules)
+    local built_modules = {}
+    local built_headerunits = {}
+    local objectfiles = {}
+
+    -- feed the dag
+    local edges = _get_edges(table.keys(modules), modules)
     local dag = graph.new(true)
     for _, e in ipairs(edges) do
         dag:add_edge(e[1], e[2])
     end
-    local cycle = dag:find_cycle()
-    if cycle then
-        local names = {}
-        for _, objectfile in ipairs(cycle) do
-            local name, _, cppfile = support.get_provided_module(modules[objectfile])
-            table.insert(names, name or cppfile)
-        end
-        local name, _, cppfile = support.get_provided_module(modules[cycle[1]])
-        table.insert(names, name or cppfile)
-        raise("circular modules dependency detected!\n%s", table.concat(names, "\n   -> import "))
-    end
-
-    local objectfiles_sorted = table.reverse(dag:topological_sort())
-    local objectfiles_sorted_set = hashset.from(objectfiles_sorted)
-    for _, objectfile in ipairs(objectfiles) do
-        if not objectfiles_sorted_set:has(objectfile) then
-            table.insert(objectfiles_sorted, objectfile)
-            objectfiles_sorted_set:insert(objectfile)
+    -- check if dag have dependency cycles
+    local has_cycle = dag:find_cycle()
+    if has_cycle then
+        local cycle = dag:find_cycle()
+        if cycle then
+            local names = {}
+            for _, sourcefile in ipairs(cycle) do
+                local module = modules[sourcefile]
+                table.insert(names, module.name or module.sourcefile)
+            end
+            local module = modules[cycle[1]]
+            table.insert(names, module.name or module.sourcefile)
+            raise("circular modules dependency detected!\n%s", table.concat(names, "\n   -> import "))
         end
     end
+    -- sort sourcefiles by dependencies
+    local sourcefiles_sorted = dag:topological_sort()
+    sourcefiles_sorted = table.reverse(sourcefiles_sorted)
+    local sourcefiles_sorted_set = hashset.from(sourcefiles_sorted)
+    for _, sourcefile in ipairs(sourcefiles) do
+        if not sourcefiles_sorted_set:has(sourcefile) then
+            table.insert(sourcefiles_sorted, sourcefile)
+            sourcefiles_sorted_set:insert(sourcefile)
+        end
+    end
+    -- handle case where dag is empty
+    if #sourcefiles_sorted == 0 then
+        sourcefiles_sorted = {table.keys(modules)[1]}
+    end
+    -- prepare objectfiles list built by the target
     local culleds
-    for _, objectfile in ipairs(objectfiles_sorted) do
-        local name, provide, cppfile = support.get_provided_module(modules[objectfile])
-        local fileconfig = target:fileconfig(cppfile)
-        local public
-        local external
-        local can_cull = true
-        if fileconfig then
-            public = fileconfig.public
-            external = fileconfig.external
-            can_cull = fileconfig.cull == nil and true or fileconfig.cull
-        end
-        can_cull = can_cull and target:policy("build.c++.modules.culling")
-        local insert = true
-        if provide then
-            insert = public or (not external or external.moduleonly)
-            if insert and not public and can_cull then
+    for _, sourcefile in ipairs(sourcefiles_sorted) do
+        local module = modules[sourcefile]
+        local insert = false
+        local insert_objectfile = false
+        local can_cull = target:policy("build.c++.modules.culling")
+        local dont_cull = false
+        local name
+        if module.interface then
+            name = module.name
+            local fileconfig = target:fileconfig(sourcefile)
+            local public
+            local external
+
+            if fileconfig then
+                public = fileconfig.public
+                external = fileconfig.external
+                can_cull = fileconfig.cull == nil and can_cull or fileconfig.cull
+            end
+
+            insert = true
+            insert_objectfile = true
+
+            -- external modules from non-module only target are always reused
+            -- and let the compiler warn about incompatible modules
+            if external and external.reuse then
                 insert = false
-                local edges = dag:adjacent_edges(objectfile)
-                local public = fileconfig and fileconfig.public
+                dont_cull = true
+            end
+
+            -- if culling is enabled and not a public module, try to cull
+            if insert and can_cull and not public then
+                insert = false
+                insert_objectfile = false
+                local edges = dag:adjacent_edges(sourcefile)
                 if edges then
                     for _, edge in ipairs(edges) do
-                        if edge:to() ~= objectfile and objectfiles_sorted_set:has(edge:to()) then
+                        if edge:to() ~= sourcefile and sourcefiles_sorted_set:has(edge:to()) then
+                            insert = true
+                            insert_objectfile = true
+                            break
+                        end
+                    end
+                end
+            end
+            if external and not external.moduleonly then
+                insert_objectfile = false
+            end
+        elseif module.headerunit then
+            local insert = true
+            local fileconfig = target:fileconfig(sourcefile)
+            if fileconfig then
+                can_cull = fileconfig.cull == nil and can_cull or fileconfig.cull
+            end
+            if can_cull then
+                insert = false
+                local edges = dag:adjacent_edges(sourcefile)
+                if edges then
+                    for _, edge in ipairs(edges) do
+                        if edge:to() ~= sourcefile and sourcefiles_sorted_set:has(edge:to()) then
                             insert = true
                             break
                         end
                     end
                 end
             end
-        end
-        if insert then 
-            table.insert(build_objectfiles, objectfile)
-            table.insert(link_objectfiles, objectfile)
-        elseif external and not external.from_moduleonly then
-            table.insert(build_objectfiles, objectfile)
+            if insert then
+                table.insert(built_headerunits, sourcefile)
+            end
         else
-            objectfiles_sorted_set:remove(objectfile)
-            if name ~= "std" and name ~= "std.compat" then
+            -- if the module is not a named module, we always insert it
+            insert = true
+            insert_objectfile = true
+
+            local fileconfig = target:fileconfig(sourcefile)
+            local external = fileconfig and fileconfig.external
+            if external and not external.moduleonly then
+                insert_objectfile = false
+            end
+        end
+
+        -- if module not culled build it, if not notify that the module has been culled
+        if insert_objectfile then
+            table.insert(objectfiles, tostring(target:objectfile(sourcefile)))
+        end
+        if insert then
+            table.insert(built_modules, sourcefile)
+            for _, dep in pairs(module.deps) do
+                if dep.headerunit then
+                    table.insert(built_headerunits, dep.sourcefile)
+                end
+            end
+        elseif dont_cull then
+        elseif not module.headerunit then
+            sourcefiles_sorted_set:remove(sourcefile)
+            if can_cull and name ~= "std" and name ~= "std.compat" then
                 culleds = culleds or {}
                 culleds[target:name()] = culleds[target:name()] or {}
-                table.insert(culleds[target:name()], format("%s -> %s", name, cppfile))
+                table.insert(culleds[target:name()], format("%s -> %s", name, sourcefile))
             end
         end
     end
 
+    -- if some named modules has been culled, notify the user
     if culleds then
         if option.get("verbose") then
             local culled_strs = {}
@@ -492,8 +593,9 @@ function sort_modules_by_dependencies(target, objectfiles, modules, opt)
             wprint("some modules have got culled, use verbose (-v) mode to more informations")
         end
     end
-
-    return build_objectfiles, link_objectfiles
+    table.sort(objectfiles)
+    print(objectfiles)
+    return built_modules, table.unique(built_headerunits), objectfiles
 end
 
 -- get source modulefile for external target deps
@@ -502,13 +604,18 @@ function get_targetdeps_modules(target)
     for _, dep in ipairs(target:orderdeps()) do
         local sourcebatch = dep:sourcebatches()["c++.build.modules.builder"]
         if sourcebatch and sourcebatch.sourcefiles then
+            local compinst = dep:compiler("cxx")
             for _, sourcefile in ipairs(sourcebatch.sourcefiles) do
                 local fileconfig = dep:fileconfig(sourcefile)
                 local public = (fileconfig and fileconfig.public and not fileconfig.external) or false
                 if public then
                     sourcefiles = sourcefiles or {}
-                    table.insert(sourcefiles, sourcefile)
-                    target:fileconfig_add(sourcefile, {external = {moduleonly = dep:is_moduleonly()}})
+                    local flags = compinst:compflags({target = dep, sourcefile = sourcefile, sourcekind = "cxx"})
+                    flags = support.strip_mapper_flags(dep, flags) or {}
+                    table.insert(sourcefiles, {file = sourcefile, external = { reuse = not dep:is_moduleonly(),
+                                                                               moduleonly = dep:is_moduleonly(),
+                                                                               flags = flags,
+                                                                               target = dep }})
                 end
             end
         end

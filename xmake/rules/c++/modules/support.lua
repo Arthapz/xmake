@@ -64,9 +64,23 @@ function load(target)
     _support(target).load(target)
 end
 
+-- strip module mapper flag
+function strip_mapper_flags(target, flags)
+    return _support(target).strip_mapper_flag(flags)
+end
+
 -- strip flags not relevent for module reuse
-function strip_flags(target, flags)
-    return _support(target).strip_flags(target, flags)
+function strip_flags(target, flags, opt)
+    return _support(target).strip_flags(flags, opt)
+end
+
+function get_headerunit_key(target, headerfile, opt)
+    local flags = opt and opt.flags
+    if not flags then
+        local compinst = target:compiler("cxx")
+        flags = compinst:compflags({sourcefile = sourcefile, target = target, sourcekind = "cxx"})
+    end
+    return get_modulehash(target, headerfile, {suffix = table.concat(strip_flags(target, flags))})
 end
 
 -- patch sourcebatch
@@ -88,7 +102,7 @@ function get_bmi_extension(target)
     return _support(target).get_bmi_extension()
 end
 
--- get bmi path
+-- get bmi pathx
 -- @see https://github.com/xmake-io/xmake/issues/4063
 function get_bmi_path(bmifile)
     bmifile = bmifile:gsub(":", "_PARTITION_")
@@ -182,60 +196,38 @@ function localcache()
     return _localcache.cache("cxxmodules")
 end
 
-
--- get stl headerunits cache directory
-function stlheaderunits_cachedir(target, opt)
-    opt = opt or {}
-    local stlcachedir = path.join(target:autogendir(), "rules", "bmi", "cache", "stl-headerunits")
-    if opt.mkdir and not os.isdir(stlcachedir) then
-        os.mkdir(stlcachedir)
-        os.mkdir(path.join(stlcachedir, "experimental"))
-    end
-    return stlcachedir
-end
--- get stl modules cache directory
-function stlmodules_cachedir(target, opt)
-    opt = opt or {}
-    local stlcachedir = path.join(target:autogendir(), "rules", "bmi", "cache", "stl-modules")
-    if opt.mkdir and not os.isdir(stlcachedir) then
-        os.mkdir(stlcachedir)
-    end
-    return stlcachedir
-end
-
--- get headerunits cache directory
-function headerunits_cachedir(target, opt)
-    opt = opt or {}
-    local cachedir = path.join(target:autogendir(), "rules", "bmi", "cache", "headerunits")
-    if opt.mkdir and not os.isdir(cachedir) then
-        os.mkdir(cachedir)
-    end
-    return cachedir
-end
-
 -- get modules cache directory
 function modules_cachedir(target, opt)
-    opt = opt or {}
-    local cachedir = path.join(target:autogendir(), "rules", "bmi", "cache", "modules")
+    assert(opt and (opt.named ~= nil or opt.headerunit))
+    local type
+    if opt.headerunit then
+        type = "headerunit"
+    elseif opt.named then
+        type = "nameds"
+    else 
+        type = "implementation"
+    end
+    local cachedir = path.join(target:autogendir(), "rules", "bmi", "cache", type)
     if opt.mkdir and not os.isdir(cachedir) then
         os.mkdir(cachedir)
     end
     return cachedir
 end
 
-function get_modulehash(target, modulepath)
-    local key = path.directory(modulepath) .. target:name()
+function get_modulehash(target, modulefile, opt)
+    local key = (modulefile .. ((opt and opt.suffix) or target:name()))
     return hash.uuid(key):split("-", {plain = true})[1]:lower()
 end
 
 function get_metafile(target, modulefile)
-    local outputdir = get_outputdir(target, modulefile)
+    -- metafile are only for named modules
+    local outputdir = get_outputdir(target, modulefile, {named = true})
     return path.join(outputdir, path.filename(modulefile) .. ".meta-info")
 end
 
-function get_outputdir(target, module)
-    local cachedir = module and modules_cachedir(target) or headerunits_cachedir(target)
-    local modulehash = get_modulehash(target, module.path or module)
+function get_outputdir(target, modulefile, opt)
+    local cachedir = modules_cachedir(target, opt)
+    local modulehash = opt.key or get_modulehash(target, modulefile, opt)
     local outputdir = path.join(cachedir, modulehash)
     if not os.exists(outputdir) then
         os.mkdir(outputdir)
