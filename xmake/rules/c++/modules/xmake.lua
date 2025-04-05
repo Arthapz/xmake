@@ -28,41 +28,7 @@ rule("c++.build.modules")
     add_deps("c++.build.modules.install")
 
     on_config(function (target)
-        import("support")
-
-        -- we disable to build across targets in parallel, because the source files may depend on other target modules
-        -- @see https://github.com/xmake-io/xmake/issues/1858
-        if support.contains_modules(target) then
-            -- @note this will cause cross-parallel builds to be disabled for all sub-dependent targets,
-            -- even if some sub-targets do not contain C++ modules.
-            --
-            -- maybe we will have a more fine-grained configuration strategy to disable it in the future.
-            target:set("policy", "build.across_targets_in_parallel", false)
-
-            -- disable ccache for this target
-            --
-            -- Caching can affect incremental compilation, for example
-            -- by interfering with the results of depfile generation for msvc.
-            --
-            -- @see https://github.com/xmake-io/xmake/issues/3000
-            target:set("policy", "build.ccache", false)
-
-            -- load compiler support
-            support.load(target)
-
-            -- mark this target with modules
-            target:data_set("cxx.has_modules", true)
-
-            -- moduleonly modules are implicitly public
-            if target:is_moduleonly() then
-                local sourcebatch = target:sourcebatches()["c++.build.modules.builder"]
-                if sourcebatch then
-                    for _, sourcefile in ipairs(sourcebatch.sourcefiles) do
-                        target:fileconfig_add(sourcefile, {public = true})
-                    end
-                end
-            end
-        end
+        import("config")(target)
     end)
 
 -- build modules
