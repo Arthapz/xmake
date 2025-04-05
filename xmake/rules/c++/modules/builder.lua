@@ -34,50 +34,21 @@ import("support")
 import("scanner")
 
 -- build target modules
-function _build_modules(target, sourcebatch, modules, opt)
-    local objectfiles = sourcebatch.objectfiles
-    for _, objectfile in ipairs(objectfiles) do
-        local module = modules[objectfile]
-        if not module then
-            goto continue
-        end
+function _build_modules(target, modules, built_modules, opt)
+    if not opt.batchjobs then
+        built_modules = table.reverse(built_modules)
+    end
+    for _, sourcefile in ipairs(built_modules) do
+        local module = modules[sourcefile]
 
-        local name, _, cppfile = support.get_provided_module(module)
-        cppfile = cppfile or module.cppfile
-
-        local deps = {}
-        for _, dep in ipairs(table.keys(module.requires or {})) do
-            table.insert(deps, opt.batchjobs and target:name() .. dep or dep)
-        end
-
-        opt.build_module(deps, module, name, objectfile, cppfile)
-
-        ::continue::
+        opt.build_module(module, sourcefile, get_from_target_mapper(target, module.name).objectfile)
     end
 end
 
 -- build target headerunits
-function _build_headerunits(target, headerunits, opt)
-
-    local outputdir = support.headerunits_cachedir(target, {mkdir = true})
-    if opt.stl_headerunit then
-        outputdir = path.join(outputdir, "stl")
-    end
-
+function _build_headerunits(headerunits, opt)
     for _, headerunit in ipairs(headerunits) do
-        local outputdir = outputdir
-        if opt.stl_headerunit and headerunit.name:startswith("experimental/") then
-            outputdir = path.join(outputdir, "experimental")
-        end
-        local bmifile = path.join(outputdir, path.filename(headerunit.name) .. support.get_bmi_extension(target))
-        local key = path.normalize(headerunit.path)
-        local build = should_build(target, headerunit.path, bmifile, {key = key, headerunit = true})
-
-        if build then
-            mark_build(target, key)
-        end
-
-        opt.build_headerunit(headerunit, key, bmifile, outputdir, build)
+        opt.build_headerunit(headerunit)
     end
 end
 
@@ -89,9 +60,11 @@ function _are_flags_compatible(target, other, cppfile)
     local compinst2 = other:compiler("cxx")
     local flags2 = compinst2:compflags({sourcefile = cppfile, target = other})
 
+    local strip_defines = not target:policy("build.c++.modules.tryreuse.discriminate_on_defines")
+    
     -- strip unrelevent flags
-    flags1 = support.strip_flags(target, flags1)
-    flags2 = support.strip_flags(target, flags2)
+    flags1 = support.strip_flags(target, flags1, {strip_defines = strip_defines})
+    flags2 = support.strip_flags(target, flags2, {strip_defines = strip_defines})
 
     if #flags1 ~= #flags2 then
         return false
@@ -131,7 +104,7 @@ function _try_reuse_modules(target, modules)
             local mapped = get_from_target_mapper(dep, name)
             if mapped then
                 support.memcache():set2(target:name() .. name, "reuse", true)
-                add_module_to_target_mapper(target, mapped.name, mapped.sourcefile, mapped.bmi, table.join(mapped.opt or {}, {target = dep}))
+                add_module_to_target_mapper(target, mapped.name, mapped.sourcefile, mapped.bmifile, table.join(mapped.opt or {}, {target = dep}))
                 break
             end
             ::nextdep::
@@ -143,75 +116,79 @@ function _try_reuse_modules(target, modules)
 end
 
 -- should we build this module or headerunit ?
-function should_build(target, sourcefile, bmifile, opt)
-    opt = opt or {}
-    local objectfile = opt.objectfile
-    local compinst = compiler.load("cxx", {target = target})
-    local compflags = compinst:compflags({sourcefile = sourcefile, target = target})
-    local dependfile = target:dependfile(bmifile or objectfile)
-    local dependinfo = target:is_rebuilt() and {} or (depend.load(dependfile) or {})
-    local depvalues = {compinst:program(), compflags}
+function should_build(target, module)
 
-    -- force rebuild a module if any of its module dependency is rebuilt
-    local requires = opt.requires
-    if requires then
-        for required, _ in table.orderpairs(requires) do
-            local m = get_from_target_mapper(target, required)
-            if m then
-                local rebuild = (m.opt and m.opt.target) and support.memcache():get2("should_build_in_" .. m.opt.target:name(), m.key)
-                                                         or support.memcache():get2("should_build_in_" .. target:name(), m.key)
-                if rebuild then
-                    dependinfo.files = {}
-                    table.insert(dependinfo.files, sourcefile)
-                    dependinfo.values = depvalues
-                    return true, dependinfo
-                end
+    module = module.alias_of or module
+    local _should_build = support.memcache():get2(target:name(), "should_build_" .. module.sourcefile)
+    if _should_build == nil then
+        local compinst = compiler.load("cxx", {target = target})
+        local compflags = compinst:compflags({sourcefile = module.sourcefile, target = target})
+
+        local dependfile = target:dependfile(module.bmifile or module.objectfile)
+        local dependinfo = {}
+        dependinfo.files = {module.sourcefile}
+        dependinfo.values = {compinst:program(), compflags}
+        dependinfo.lastmtime = os.isfile(module.bmifile or module.objectfile) and os.mtime(dependfile) or 0
+
+        local old_dependinfo = target:is_rebuilt() and {} or (depend.load(dependfile) or {})
+        if old_dependinfo.values then
+            old_dependinfo.values[2] = support.strip_mapper_flags(target, old_dependinfo.values[2])
+        end
+        old_dependinfo.files = {module.sourcefile}
+
+        -- force rebuild a module if any of its module dependency is rebuilt
+        for dep_name, dep_module in table.orderpairs(module.deps) do
+            local fileconfig = target:fileconfig(dep_module.sourcefile)
+            local external = fileconfig and fileconfig.external
+            local _target = target
+            if external and external.target and not external.moduleonly then
+                _target = external.target
+            end
+
+            local mapped_dep = get_from_target_mapper(_target, dep_name)
+            if dep_module.headerunit and mapped_dep.alias_of then
+                local key = support.get_headerunit_key(_target, dep_module.sourcefile)
+                mapped_dep = mapped_dep.alias_of[key]
+            end
+            if should_build(_target, mapped_dep) then
+                depend.save(dependinfo, dependfile)
+                support.memcache():set2(target:name(), "should_build_" .. module.sourcefile, true)
+                return true
             end
         end
-    end
 
-    -- reused
-    if opt.name then
-        local m = get_from_target_mapper(target, opt.name)
-        if m and m.opt and m.opt.target then
-            local rebuild = support.memcache():get2("should_build_in_" .. m.opt.target:name(), m.key)
-            if rebuild then
-                dependinfo.files = {}
-                table.insert(dependinfo.files, sourcefile)
-                dependinfo.values = depvalues
-            end
-            return rebuild, dependinfo
+        -- need build this object?
+        local dryrun = option.get("dry-run")
+        if dryrun or depend.is_changed(old_dependinfo, dependinfo) then
+            depend.save(dependinfo, dependfile)
+            support.memcache():set2(target:name(), "should_build_" .. module.sourcefile, true)
+            return true
         end
+        support.memcache():set2(target:name(), "should_build_" .. module.sourcefile, false)
+        return false
     end
-
-    -- need build this object?
-    local dryrun = option.get("dry-run")
-    local lastmtime = os.isfile(bmifile or objectfile) and os.mtime(dependfile) or 0
-    if dryrun or depend.is_changed(dependinfo, {lastmtime = lastmtime, values = depvalues}) then
-        dependinfo.files = {}
-        table.insert(dependinfo.files, sourcefile)
-        dependinfo.values = depvalues
-        return true, dependinfo
-    end
-    return false
+    return _should_build
 end
 
 -- generate meta module informations for package / other buildsystems import
 --
 -- e.g
 -- {
---      "defines": ["FOO=BAR"]
+--      "flags": ["--std=c++23"]
 --      "imports": ["std", "bar"]
 --      "name": "foo"
 --      "file": "foo.cppm"
 -- }
 function _generate_meta_module_info(target, name, sourcefile, requires)
 
+    local compinst = target:compiler("cxx")
+    local flags = support.strip_flags(target, compinst:compflags({sourcefile = sourcefile, target = target, sourcekind = "cxx"})) or {}
+    print("AAAAAAAA", compinst:compflags({sourcefile = sourcefile, target = target, sourcekind = "cxx"}), flags)
     local modulehash = support.get_modulehash(target, sourcefile)
     local module_metadata = {name = name, file = path.join(modulehash, path.filename(sourcefile))}
 
-    -- add definitions
-    module_metadata.defines = _builder(target).get_module_required_defines(target, sourcefile)
+    -- add flags
+    module_metadata.flags = flags
 
     -- add imports
     if requires then
@@ -226,11 +203,6 @@ end
 function _target_module_map_cachekey(target)
     local mode = config.mode()
     return target:name() .. "module_mapper" .. (mode or "")
-end
-
-function _is_duplicated_headerunit(target, key)
-    local _, mapper_keys = get_target_module_mapper(target)
-    return mapper_keys[key]
 end
 
 function _builder(target)
@@ -252,8 +224,12 @@ function _builder(target)
     return builder
 end
 
-function mark_build(target, name)
-    support.memcache():set2("should_build_in_" .. target:name(), name, true)
+function mark_build(target, key)
+    support.memcache():set2(key, "_is_built", target:name(), true)
+end
+
+function is_built(target, key)
+    return support.memcache():get2(key .. "_is_built", target:name())
 end
 
 -- build batchjobs for modules
@@ -262,9 +238,9 @@ function build_batchjobs_for_modules(modules, batchjobs, rootjob)
 end
 
 -- build modules for batchjobs
-function build_modules_for_batchjobs(target, batchjobs, sourcebatch, modules, opt)
+function build_modules_for_batchjobs(target, batchjobs, modules, built_modules, opt)
     opt.rootjob = batchjobs:group_leave() or opt.rootjob
-    batchjobs:group_enter(target:name() .. "/build_modules", {rootjob = opt.rootjob})
+    batchjobs:group_enter(target:name() .. "/build_cxxmodules", {rootjob = opt.rootjob})
 
     -- add populate module job
     local modulesjobs = {}
@@ -278,33 +254,37 @@ function build_modules_for_batchjobs(target, batchjobs, sourcebatch, modules, op
     }
 
     -- add module jobs
-    _build_modules(target, sourcebatch, modules, table.join(opt, {
-       build_module = function(deps, module, name, objectfile, cppfile)
-        local job_name = name and target:name() .. name or cppfile
-        modulesjobs[job_name] = _builder(target).make_module_buildjobs(target, batchjobs, job_name, deps,
-            {module = module, objectfile = objectfile, cppfile = cppfile})
-      end
-    }))
+    -- for _, sourcefile in ipairs(built_modules) do
+    --     local module = modules[sourcefile]
+
+    --     opt.build_module(module, sourcefile, get_from_target_mapper(target, module.name).objectfile)
+    -- end
+    -- _build_modules(target, modules built_modules, table.join(opt, {
+    --    build_module = function(module, sourcefile, objectfile)
+    --     local job_name = name and target:name() .. name or sourcefile
+    --     modulesjobs[job_name] = _builder(target).make_module_buildjobs(target, batchjobs, job_name, deps,
+    --         {module = module, objectfile = objectfile, cppfile = cppfile})
+    --   end
+    -- }))
 
     -- build batchjobs for modules
     build_batchjobs_for_modules(modulesjobs, batchjobs, opt.rootjob)
 end
 
 -- build modules for batchcmds
-function build_modules_for_batchcmds(target, batchcmds, sourcebatch, modules, opt)
+function build_modules_for_batchcmds(target, batchcmds, modules, built_modules, opt)
 
     local depmtime = 0
-    opt.progress = opt.progress or 0
-
-    _try_reuse_modules(target, modules)
-    _builder(target).populate_module_map(target, modules)
-
     -- build modules
-    _build_modules(target, sourcebatch, modules, table.join(opt, {
-       build_module = function(_, module, _, objectfile, cppfile)
-          depmtime = math.max(depmtime, _builder(target).make_module_buildcmds(target, batchcmds, {module = module, cppfile = cppfile, objectfile = objectfile, progress = opt.progress}))
-      end
-    }))
+    built_modules = table.reverse(built_modules)
+    local builder = _builder(target)
+
+    for _, sourcefile in ipairs(built_modules) do
+        local module = modules[sourcefile]
+
+        depmtime = math.max(depmtime,
+            builder.make_module_buildcmds(target, batchcmds, module, opt))
+    end
 
     batchcmds:set_depmtime(depmtime)
 end
@@ -348,39 +328,30 @@ function build_headerunits_for_batchjobs(target, batchjobs, sourcebatch, modules
 end
 
 -- generate headerunits for batchcmds
-function build_headerunits_for_batchcmds(target, batchcmds, sourcebatch, modules, opt)
+function build_headerunits_for_batchcmds(target, batchcmds, modules, built_headerunits, opt)
 
-    local user_headerunits, stl_headerunits = scanner.get_headerunits(target, sourcebatch, modules)
-    if not user_headerunits and not stl_headerunits then
+    local headerunits, stl_headerunits = scanner.sort_headerunits(modules, built_headerunits)
+    if not headerunits and not stl_headerunits then
        return
     end
 
-    local build_headerunits = function(headerunits)
-        local depmtime = 0
-        _build_headerunits(target, headerunits, table.join(opt, {
-            build_headerunit = function(headerunit, _, bmifile, outputdir, build)
-                depmtime = math.max(depmtime, _builder(target).make_headerunit_buildcmds(target, batchcmds, headerunit, bmifile, outputdir, table.join({build = build}, opt)))
-            end
-        }))
-        batchcmds:set_depmtime(depmtime)
-    end
-
+    local builder = _builder(target)
     -- build stl header units first as other headerunits may need them
-    if stl_headerunits then
-        opt.stl_headerunit = true
-        build_headerunits(stl_headerunits)
+    opt.stl_headerunit = true
+    for _, headerunit in ipairs(stl_headerunits) do
+        builder.make_headerunit_buildcmds(target, batchcmds, modules[headerunit], opt)
     end
-    if user_headerunits then
-        opt.stl_headerunit = false
-        build_headerunits(user_headerunits)
+    opt.stl_headerunit = false
+    for _, headerunit in ipairs(headerunits) do
+        builder.make_headerunit_buildcmds(target, batchcmds, modules[headerunit], opt)
     end
 end
 
 function generate_metadata(target, modules)
+
     local public_modules
-    for _, module in table.orderpairs(modules) do
-        local _, _, cppfile = support.get_provided_module(module)
-        local fileconfig = target:fileconfig(cppfile)
+    for sourcefile, module in table.orderpairs(modules) do
+        local fileconfig = target:fileconfig(sourcefile)
         local public = fileconfig and fileconfig.public
         if public then
             public_modules = public_modules or {}
@@ -393,18 +364,17 @@ function generate_metadata(target, modules)
     end
 
     local jobs = option.get("jobs") or os.default_njob()
-    runjobs(target:name() .. "_install_modules", function(index, total, jobopt)
+    runjobs(target:name() .. "_install_modules", function(index, _, jobopt)
         local module = public_modules[index]
-        local name, _, cppfile = support.get_provided_module(module)
-        local metafilepath = support.get_metafile(target, cppfile)
-        progress.show(jobopt.progress, "${color.build.target}<%s> generating.module.metadata %s", target:name(), name)
-        local metadata = _generate_meta_module_info(target, name, cppfile, module.requires)
+        local metafilepath = support.get_metafile(target, module.sourcefile)
+        progress.show(jobopt.progress, "${color.build.target}<%s> generating.module.metadata %s", target:name(), module.name)
+        local metadata = _generate_meta_module_info(target, module.name, module.sourcefile, module.deps)
         json.savefile(metafilepath, metadata)
     end, {comax = jobs, total = #public_modules})
 end
 
--- flush target module mapper keys
-function flush_target_module_mapper_keys(target)
+-- invalidate module mapper keys
+function _invalidate_mapper_keys(target)
     local memcache = support.memcache()
     memcache:set2(target:name(), "module_mapper_keys", nil)
 end
@@ -416,51 +386,83 @@ function get_target_module_mapper(target)
     if not mapper then
         mapper = {}
         memcache:set2(target:name(), "module_mapper", mapper)
+    else
     end
-
-    -- we generate the keys map to optimise the efficiency of _is_duplicated_headerunit
-    local mapper_keys = memcache:get2(target:name(), "module_mapper_keys")
-    if not mapper_keys then
-        mapper_keys = {}
+    local memcache = support.memcache()
+    -- we generate the keys map to optimise the efficiency
+    local keys = memcache:get2(target:name(), "module_mapper_keys")
+    if not keys then
+        keys = {}
         for _, item in pairs(mapper) do
             if item.key then
-                mapper_keys[item.key] = item
+                table.insert(keys, item.key)
             end
         end
-        memcache:set2(target:name(), "module_mapper_keys", mapper_keys)
+        keys = hashset.from(keys)
+        memcache:set2(target:name(), "module_mapper_keys", keys)
     end
-    return mapper, mapper_keys
+    return mapper, keys
 end
 
--- get a module or headerunit from target mapper
-function get_from_target_mapper(target, name)
-    local mapper = get_target_module_mapper(target)
-    if mapper[name] then
-        return mapper[name]
+-- feed the module mapper
+function feed_module_mapper(target, modules, built_modules, built_headerunits)
+    local built_set = hashset.from(table.join(built_modules or {}, built_headerunits or {}))
+    -- insert dependencies mappers
+    local mapper, keys = get_target_module_mapper(target)
+    for _, dep in ipairs(target:orderdeps()) do
+        local dep_mapper = get_target_module_mapper(dep)
+        if dep_mapper then
+            table.join2(mapper, dep_mapper)
+        end
+    end
+
+    -- feed modules map
+    local compinst = target:compiler("cxx")
+    for sourcefile, module in pairs(modules) do
+        if built_set:has(sourcefile) then
+            local fileconfig = target:fileconfig(sourcefile)
+            local flags
+            if fileconfig and fileconfig.external then
+                flags = fileconfig.external.flags
+            end
+            if module.headerunit then
+                flags = flags or support.strip_flags(target, compinst:compflags({sourcefile = sourcefile, target = target, sourcekind = "cxx"}))
+                local key = support.get_headerunit_key(target, sourcefile, {flags = flags})
+                if not keys:has(key) then
+                    mapper[key] = {name = module.name, bmifile = module.bmifile, sourcefile = module.sourcefile, method = module.method, key = key}
+                    _invalidate_mapper_keys(target)
+                end
+                mapper[module.name] = mapper[module.name] or {}
+                mapper[module.name].alias_of = mapper[module.name].alias_of or {}
+                mapper[module.name].alias_of[key] = mapper[key]
+                for _, alias in ipairs(module.aliases) do
+                    mapper[alias] = {alias_of = mapper[key]}
+                    mapper[alias].alias_of[key] = mapper[key]
+                end
+            elseif module.interface or module.implementation then
+                if not keys[module.name] then
+                    mapper[module.name] = {name = module.name, bmifile = module.bmifile, sourcefile = module.sourcefile, deps = module.deps, flags = flags}
+                end
+            end
+        end
     end
 end
 
 -- add a module to target mapper
-function add_module_to_target_mapper(target, name, sourcefile, bmifile, opt)
-    local mapper = get_target_module_mapper(target)
-    if not mapper[name] then
-        mapper[name] = {name = name, key = name, bmi = bmifile, sourcefile = sourcefile, opt = opt}
-    end
-    flush_target_module_mapper_keys(target)
+function add_module_to_target_mapper(target, module, flags)
+    local mapper, keys = get_target_module_mapper(target)
 end
 
 -- add a headerunit to target mapper
-function add_headerunit_to_target_mapper(target, headerunit, bmifile)
+function add_headerunit_to_target_mapper(target, module, key)
+    local mapper, keys = get_target_module_mapper(target)
+
+end
+
+-- get a module from target mapper by name
+function get_from_target_mapper(target, key)
     local mapper = get_target_module_mapper(target)
-    local key = hash.uuid(path.normalize(headerunit.path))
-    local deduplicated = _is_duplicated_headerunit(target, key)
-    if deduplicated then
-        mapper[headerunit.name] = {name = headerunit.name, key = key, aliasof = deduplicated.name, headerunit = headerunit}
-    else
-        mapper[headerunit.name] = {name = headerunit.name, key = key, headerunit = headerunit, bmi = bmifile}
-    end
-    flush_target_module_mapper_keys(target)
-    return deduplicated and true or false
+    return mapper[key]
 end
 
 -- check if dependencies changed
