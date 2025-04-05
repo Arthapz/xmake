@@ -1,5 +1,6 @@
 ﻿target("a")
-    set_kind("moduleonly")
+    set_kind("static")
     add_headerfiles("*.hpp")
-    add_files("a.mpp")
+    add_includedirs(".", {public = true})
+    add_files("a.mpp", {public = true})
     set_languages("cxxlatest")

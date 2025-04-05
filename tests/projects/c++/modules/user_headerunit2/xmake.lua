@@ -1,4 +1,8 @@
 ﻿includes("a", "b")
+
+set_policy("build.c++.modules.std", false)
+
 target("test")
     add_deps("a", "b")
-    set_kind("phony")
+    add_files("src/*.cpp")
+    set_languages("cxxlatest")
