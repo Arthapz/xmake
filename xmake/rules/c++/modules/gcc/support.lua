@@ -67,13 +67,23 @@ function load(target)
     end
 end
 
+-- strip module mapper flag
+function strip_mapper_flag(flags)
+    local output = {}
+    for _, flag in ipairs(flags) do
+        if not flag:startswith("-fmodule-mapper") then
+            table.insert(output, flag)
+        end
+    end
+    return output
+end
+
 -- strip flags that doesn't affect bmi generation
-function strip_flags(target, flags)
+function strip_flags(flags, opt)
     -- speculative list as there is no resource that list flags that prevent reusability, this list will likely be improve over time
     local strippable_flags = {
         "-I",
         "-isystem",
-        "-g",
         "-O",
         "-W",
         "-w",
@@ -81,7 +91,7 @@ function strip_flags(target, flags)
         "-Q",
         "-fmodule-mapper",
     }
-    if not target:policy("build.c++.modules.tryreuse.discriminate_on_defines") then
+    if opt and opt.strip_defines then
         table.join2(strippable_flags, {"-D", "-U"})
     end
     local output = {}
@@ -89,8 +99,13 @@ function strip_flags(target, flags)
     for _, flag in ipairs(flags) do
         local strip = false
         for _, _flag in ipairs(strippable_flags) do
-            if flag:startswith(_flag) or last_flag_I then
-                last_flag_I = _flag == "-I"
+            if last_flag_I then
+                strip = true
+                last_flag_I = false
+            elseif flag == _flag then
+                strip = true
+            elseif flag:startswith(_flag) or last_flag_I then
+                last_flag_I = (_flag == "-I" or _flag == "-isystem" or _flag == "-cxx-isystem")
                 strip = true
                 break
             end
