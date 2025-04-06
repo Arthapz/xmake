@@ -74,6 +74,17 @@ function strip_flags(target, flags, opt)
     return _support(target).strip_flags(flags, opt)
 end
 
+-- strip flags not relevent for module reuse
+function get_defines(flags)
+    local defines = {}
+    for _, flag in ipairs(flags) do
+        if flag:startswith("/D") or flag:startswith("-D") or flag:startswith("-U") or flag:startswith("/U") then
+            table.insert(defines, flag:sub(3))
+        end
+    end
+    return defines
+end
+
 function get_headerunit_key(target, headerfile, opt)
     local flags = opt and opt.flags
     if not flags then

@@ -121,6 +121,11 @@ function should_build(target, module)
     module = module.alias_of or module
     local _should_build = support.memcache():get2(target:name(), "should_build_" .. module.sourcefile)
     if _should_build == nil then
+        local fileconfig = target:fileconfig(module.sourcefile)
+        local external = fileconfig and fileconfig.external
+        if external and external.target and not external.moduleonly then
+            return support.memcache():get2(external.target:name(), "should_build_" .. module.sourcefile)
+        end
         local compinst = compiler.load("cxx", {target = target})
         local compflags = compinst:compflags({sourcefile = module.sourcefile, target = target})
 
@@ -131,28 +136,27 @@ function should_build(target, module)
         dependinfo.lastmtime = os.isfile(module.bmifile or module.objectfile) and os.mtime(dependfile) or 0
 
         local old_dependinfo = target:is_rebuilt() and {} or (depend.load(dependfile) or {})
-        if old_dependinfo.values then
-            old_dependinfo.values[2] = support.strip_mapper_flags(target, old_dependinfo.values[2])
-        end
         old_dependinfo.files = {module.sourcefile}
 
         -- force rebuild a module if any of its module dependency is rebuilt
         for dep_name, dep_module in table.orderpairs(module.deps) do
-            local fileconfig = target:fileconfig(dep_module.sourcefile)
-            local external = fileconfig and fileconfig.external
+            local mapped_dep = get_from_target_mapper(target, dep_module.headerunit and dep_module.sourcefile or dep_name)
+
+            fileconfig = target:fileconfig(mapped_dep.sourcefile)
+            external = fileconfig and fileconfig.external
             local _target = target
 
             if external and external.target and not external.moduleonly then
                 _target = external.target
+                mapped_dep = get_from_target_mapper(_target, dep_module.headerunit and dep_module.sourcefile or dep_name)
             end
-
-            local mapped_dep = get_from_target_mapper(_target, dep_module.headerunit and dep_module.sourcefile or dep_name)
-            if dep_module.headerunit and mapped_dep.alias_of then
-                mapped_dep = mapped_dep.alias_of
-            end
+            mapped_dep = mapped_dep.alias_of or mapped_dep
             if should_build(_target, mapped_dep) then
                 depend.save(dependinfo, dependfile)
                 support.memcache():set2(target:name(), "should_build_" .. module.sourcefile, true)
+                if external and external.target then
+                    external.target = nil
+                end
                 return true
             end
         end
@@ -179,23 +183,18 @@ end
 --      "name": "foo"
 --      "file": "foo.cppm"
 -- }
-function _generate_meta_module_info(target, name, sourcefile, requires)
+function _generate_meta_module_info(target, module)
 
     local compinst = target:compiler("cxx")
-    local flags = support.strip_flags(target, compinst:compflags({sourcefile = sourcefile, target = target, sourcekind = "cxx"})) or {}
-    print(flags)
-    local modulehash = support.get_modulehash(target, sourcefile)
-    local module_metadata = {name = name, file = path.join(modulehash, path.filename(sourcefile))}
-
-    -- add flags
-    module_metadata.flags = flags
+    local flags = support.strip_flags(target, compinst:compflags({sourcefile = module.sourcefile, target = target, sourcekind = "cxx"})) or {}
+    local defines = support.get_defines(flags)
+    local modulehash = support.get_modulehash(target, module.sourcefile)
+    local module_metadata = {name = module.name, file = path.join(modulehash, path.filename(module.sourcefile)), defines = defines}
 
     -- add imports
-    if requires then
-        for _name, _ in table.orderpairs(requires) do
-            module_metadata.imports = module_metadata.imports or {}
-            table.append(module_metadata.imports, _name)
-        end
+    for name, _ in table.orderpairs(module.deps) do
+        module_metadata.imports = module_metadata.imports or {}
+        table.append(module_metadata.imports, name)
     end
     return module_metadata
 end
@@ -363,7 +362,7 @@ function generate_metadata(target, modules)
         local module = public_modules[index]
         local metafilepath = support.get_metafile(target, module)
         progress.show(jobopt.progress, "${color.build.target}<%s> generating.module.metadata %s", target:name(), module.name)
-        local metadata = _generate_meta_module_info(target, module.name, module.sourcefile, module.deps)
+        local metadata = _generate_meta_module_info(target, module)
         json.savefile(metafilepath, metadata)
     end, {comax = jobs, total = #public_modules})
 end
@@ -405,28 +404,30 @@ function feed_module_mapper(target, modules)
     local mapper, keys = get_target_module_mapper(target)
     local compinst = target:compiler("cxx")
     for sourcefile, module in pairs(modules) do
+        -- reuse bmifile of target dep module
         local fileconfig = target:fileconfig(sourcefile)
-        local flags
-        if fileconfig and fileconfig.external then
-            flags = fileconfig.external.flags
+        local external = fileconfig and fileconfig.external
+        local bmifile = module.bmifile
+        if external and external.reused and external.target then
+            bmifile = path.join(support.get_outputdir(external.target, sourcefile, {named = module.interface or module.implementation, headerunit = module.headerunit}), path.filename(bmifile))
+            assert(bmifile)
         end
         if module.headerunit then
-            flags = flags or support.strip_flags(target, compinst:compflags({sourcefile = sourcefile, target = target, sourcekind = "cxx"}))
+            local flags = support.strip_flags(target, compinst:compflags({sourcefile = sourcefile, target = target, sourcekind = "cxx"}))
             local key = support.get_headerunit_key(target, sourcefile, {flags = flags})
+            
             if not keys:has(key) then
-                mapper[key] = {name = module.name, bmifile = module.bmifile, sourcefile = module.sourcefile, method = module.method, key = key}
+                mapper[key] = {name = module.name, bmifile = bmifile, sourcefile = module.sourcefile, method = module.method, key = key}
                 _invalidate_mapper_keys(target)
             end
-            mapper[module.name] = mapper[module.name] or {}
-            mapper[module.name].alias_of = mapper[key]
-            mapper[module.sourcefile] = mapper[module.sourcefile] or {}
-            mapper[module.sourcefile].alias_of = mapper[key]
+            mapper[module.name] = mapper[module.name] or {alias_of = mapper[key]}
+            mapper[module.sourcefile] = mapper[module.sourcefile] or {alias_of = mapper[key]}
             for _, alias in ipairs(module.aliases) do
                 mapper[alias] = {alias_of = mapper[key]}
             end
         elseif module.interface or module.implementation then
             if not keys[module.name] then
-                mapper[module.name] = {name = module.name, bmifile = module.bmifile, sourcefile = module.sourcefile, deps = module.deps, flags = flags}
+                mapper[module.name] = {name = module.name, bmifile = bmifile, sourcefile = module.sourcefile, deps = module.deps, flags = flags}
             end
         end
     end
@@ -498,14 +499,9 @@ function main(target, batch, sourcebatch, opt)
         if target:orderdeps() then
             deps_sourcefiles = scanner.get_targetdeps_modules(target)
         end
-
-        -- extract packages modules dependencies
-        deps_sourcefiles = table.join(deps_sourcefiles or {}, scanner.get_all_packages_modules(target) or {})
-        -- print(deps_sourcefiles)
-        -- append to sourcebatch
-        for _, sourcefile_data in ipairs(deps_sourcefiles) do
-            table.insert(sourcebatch.sourcefiles, sourcefile_data.file)
-            target:fileconfig_add(sourcefile_data.file, {external = sourcefile_data.external})
+        for sourcefile, external in pairs(deps_sourcefiles) do
+            table.insert(sourcebatch.sourcefiles, sourcefile)
+            target:fileconfig_add(sourcefile, {external = external, defines = external.defines})
         end
 
         support.patch_sourcebatch(target, sourcebatch, opt)
@@ -515,7 +511,7 @@ function main(target, batch, sourcebatch, opt)
             if fileconfig and fileconfig.external and not fileconfig.external.moduleonly then
                 for _, dep in pairs(module.deps) do
                     if dep.method ~= "by-name" then
-                        target:fileconfig_add(dep.sourcefile, {external = fileconfig.external})
+                        target:fileconfig_add(dep.sourcefile, {external = fileconfig.external, defines = fileconfig.external.defines})
                     end
                 end
             end
@@ -525,7 +521,6 @@ function main(target, batch, sourcebatch, opt)
             -- avoid building non referenced modules
             local built_modules, built_headerunits, objectfiles = scanner.sort_modules_by_dependencies(target, modules)
             sourcebatch.objectfiles = objectfiles
-
 
             -- feed module mapper
             feed_module_mapper(target, modules, built_modules, built_headerunits)

@@ -134,17 +134,17 @@ function _parse_dependencies_data(target, moduleinfos)
 
                     -- XMake handle bmifile so we don't need rely on compiler-module-path
                     local fileconfig = target:fileconfig(module.sourcefile)
-                    local flags
+                    local defines
                     local module_target = target
                     if fileconfig and fileconfig.external then
-                        flags = fileconfig.external.flags
+                        defines = external.defines
                         if not fileconfig.external.moduleonly and fileconfig.external.target then
                             module_target = fileconfig.external.target
                         end
                     end
                     local bmifile = support.get_bmi_path(provide["logical-name"] .. support.get_bmi_extension(target))
                     module.bmifile = path.join(support.get_outputdir(module_target, moduleinfo.sourcefile, {named = module.interface}), bmifile)
-                    module.flags = flags
+                    module.defines = defines
                 end
             end
 
@@ -167,7 +167,11 @@ function _parse_dependencies_data(target, moduleinfos)
                             modules[sourcefile] = module.deps[name]
                             local key = support.get_headerunit_key(target, sourcefile)
                             modules[sourcefile].bmifile = _get_headerunit_bmifile(external and external.target or target, sourcefile, key)
-                        elseif modules[sourcefile].name ~= name then
+                        elseif external and not external.moduleonly then
+                            local key = support.get_headerunit_key(target, sourcefile)
+                            modules[sourcefile].bmifile = _get_headerunit_bmifile(external and external.target or target, sourcefile, key)
+                        end
+                        if modules[sourcefile].name ~= name then
                             modules[sourcefile].aliases = modules[sourcefile].aliases or {}
                             table.insert(modules[sourcefile].aliases, name)
                         end
@@ -212,36 +216,36 @@ function _get_edges(nodes, modules)
   return edges
 end
 
-function _get_package_modules(target, package)
+function _get_package_modules(package)
     local package_modules
 
-    local compinst = target:compiler("cxx")
     local modulesdir = path.join(package:installdir(), "modules")
     local metafiles = os.files(path.join(modulesdir, "*", "*.meta-info"))
     for _, metafile in ipairs(metafiles) do
         package_modules = package_modules or {}
         local modulefile, _, metadata = _parse_meta_info(metafile)
 
-        -- patch flags with include directories
-        local flags = compinst:compflags({target = target, sourcekind = "cxx"}) or {}
-        local is_includeflag = false
-        local includeflags = {}
-        for _, flag in ipairs(flags) do
-            if is_includeflag then
-                table.insert(includeflags, flag)
-                is_includeflag = false
-            elseif flag == "-I" or flag == "-isystem" or flag == "/I" then
-                table.insert(includeflags, flag)
-                is_includeflag = true
-            elseif flag:startswith("-I") or flag:startswith("-isystem") or flag:startswith("/I") then
-                table.insert(includeflags, flag)
-            end
-        end
-        metadata.flags = table.join(metadata.flags, includeflags)
+        -- -- patch flags with include directories
+        -- local defines = compinst:compflags({target = target, sourcekind = "cxx"}) or {}
+        -- local is_includeflag = false
+        -- local includeflags = {}
+        -- for _, flag in ipairs(flags) do
+        --     if is_includeflag then
+        --         table.insert(includeflags, flag)
+        --         is_includeflag = false
+        --     elseif flag == "-I" or flag == "-isystem" or flag == "/I" then
+        --         table.insert(includeflags, flag)
+        --         is_includeflag = true
+        --     elseif flag:startswith("-I") or flag:startswith("-isystem") or flag:startswith("/I") then
+        --         table.insert(includeflags, flag)
+        --     end
+        -- end
+        -- metadata.defines = table.join(metadata.flags, includeflags)
+        -- metadata.defines = defines
         
         local moduleonly = not package:libraryfiles()
-        table.insert(package_modules, {file = path.join(modulesdir, modulefile),
-                                       external = {flags = metadata.flags, moduleonly = moduleonly}})
+        package_modules[path.join(modulesdir, modulefile)] = {defines = metadata.defines,
+                                                              moduleonly = moduleonly}
     end
 
     return package_modules
@@ -258,18 +262,15 @@ function _generate_dependencies(target, sourcebatch, opt)
     else
        opt.progress = 0
     end
-    local threshold = #sourcebatch.sourcefiles
     if opt.batchjobs then
         local jobs = option.get("jobs") or os.default_njob()
         runjobs(target:name() .. "_module_scanner", function(index)
             local sourcefile = sourcebatch.sourcefiles[index]
             changed = _scanner(target).generate_dependency_for(target, sourcefile, opt) or changed
-            opt.progress = opt.progress + threshold
         end, {comax = jobs, total = #sourcebatch.sourcefiles})
     else
         for _, sourcefile in ipairs(sourcebatch.sourcefiles) do
             changed = _scanner(target).generate_dependency_for(target, sourcefile, opt) or changed
-            opt.progress = opt.progress + threshold
         end
     end
     return changed
@@ -428,7 +429,7 @@ function get_all_packages_modules(target)
 
     local packages_modules
     for _, package in table.orderpairs(packages) do
-        local package_modules = _get_package_modules(target, package)
+        local package_modules = _get_package_modules(package)
         if package_modules then
            packages_modules = packages_modules or {}
            table.join2(packages_modules, package_modules)
@@ -480,54 +481,54 @@ function sort_modules_by_dependencies(target, modules)
         local module = modules[sourcefile]
         local insert = false
         local insert_objectfile = false
-        local can_cull = target:policy("build.c++.modules.culling")
-        local dont_cull = false
         local name
-        if module.interface then
+        local fileconfig = target:fileconfig(sourcefile)
+        local external = fileconfig and fileconfig.external
+        local public = fileconfig and fileconfig.public or false
+        local can_cull = target:policy("build.c++.modules.culling")
+        if fileconfig and fileconfig.cull ~= nil then
+            can_cull = can_cull and fileconfig.cull
+        end
+        local dont_cull = false
+        if module.interface or module.implementation then
+            can_cull = can_cull and not public
             name = module.name
-            local fileconfig = target:fileconfig(sourcefile)
-            local public
-            local external
-
-            if fileconfig then
-                public = fileconfig.public
-                external = fileconfig.external
-                can_cull = fileconfig.cull == nil and can_cull or fileconfig.cull
-            end
 
             insert = true
-            insert_objectfile = true
+            insert_objectfile = not external
 
-            -- external modules from non-module only target are always reused
-            -- and let the compiler warn about incompatible modules
-            if external and external.reuse then
-                insert = false
+            if external then
                 dont_cull = true
             end
 
-            -- if culling is enabled and not a public module, try to cull
-            if insert and can_cull and not public then
+            if external and external.reused then
                 insert = false
+            end
+
+            if external and external.moduleonly then
+                insert_objectfile = true
+            end
+
+            -- if culling is enabled and not a public module, try to cull
+            if can_cull and insert and not public then
+                insert = false
+                local old_insert_objectfile = insert_objectfile
                 insert_objectfile = false
                 local edges = dag:adjacent_edges(sourcefile)
                 if edges then
                     for _, edge in ipairs(edges) do
                         if edge:to() ~= sourcefile and sourcefiles_sorted_set:has(edge:to()) then
                             insert = true
-                            insert_objectfile = true
+                            insert_objectfile = old_insert_objectfile
                             break
                         end
                     end
                 end
             end
-            if external and not external.moduleonly then
+            if not insert then
                 insert_objectfile = false
             end
         elseif module.headerunit then
-            local fileconfig = target:fileconfig(sourcefile)
-            if fileconfig then
-                can_cull = fileconfig.cull == nil and can_cull or fileconfig.cull
-            end
             local key = support.get_headerunit_key(target, sourcefile)
             local insert = (module.bmifile == _get_headerunit_bmifile(target, sourcefile, key)) -- external headerunit ?
             if insert and can_cull then
@@ -549,12 +550,6 @@ function sort_modules_by_dependencies(target, modules)
             -- if the module is not a named module, we always insert it
             insert = true
             insert_objectfile = true
-
-            local fileconfig = target:fileconfig(sourcefile)
-            local external = fileconfig and fileconfig.external
-            if external and not external.moduleonly then
-                insert_objectfile = false
-            end
         end
 
         -- if module not culled build it, if not notify that the module has been culled
@@ -591,28 +586,73 @@ function sort_modules_by_dependencies(target, modules)
     return built_modules, table.unique(built_headerunits), objectfiles
 end
 
+-- check if flags are compatible for module reuse
+function _are_flags_compatible(target, other, sourcefile)
+    local compinst1 = target:compiler("cxx")
+    local flags1 = compinst1:compflags({sourcefile = sourcefile, target = target, sourcekind = "cxx"})
+
+    local compinst2 = other:compiler("cxx")
+    local flags2 = compinst2:compflags({sourcefile = sourcefile, target = other, sourcekind = "cxx"})
+
+    local strip_defines = not target:policy("build.c++.modules.tryreuse.discriminate_on_defines")
+    
+    -- strip unrelevent flags
+    flags1 = support.strip_flags(target, flags1, {strip_defines = strip_defines})
+    flags2 = support.strip_flags(target, flags2, {strip_defines = strip_defines})
+
+    if #flags1 ~= #flags2 then
+        return false
+    end
+
+    table.sort(flags1)
+    table.sort(flags2)
+
+    for i = 1, #flags1 do
+        if flags1[i] ~= flags2[i] then
+            return false
+        end
+    end
+    return true
+end
+
 -- get source modulefile for external target deps
 function get_targetdeps_modules(target)
-    local sourcefiles
+    local modules
+    local pkg_modules = get_all_packages_modules(target)
+    if pkg_modules then
+        modules = modules or {}
+        table.join2(modules, pkg_modules)
+    end
     for _, dep in ipairs(target:orderdeps()) do
         local sourcebatch = dep:sourcebatches()["c++.build.modules.builder"]
         if sourcebatch and sourcebatch.sourcefiles then
+            local dep_deps_modules = get_targetdeps_modules(dep)
+            for sourcefile, external in pairs(dep_deps_modules) do
+                modules = modules or {}
+                local reuse = target:policy("build.c++.modules.tryreuse") and not dep:is_moduleonly() and _are_flags_compatible(target, dep, sourcefile)
+                modules[sourcefile] = external
+                modules[sourcefile].reused = reuse
+                modules[sourcefile].target = modules[sourcefile].target or dep
+            end
             local compinst = dep:compiler("cxx")
             for _, sourcefile in ipairs(sourcebatch.sourcefiles) do
-                local fileconfig = dep:fileconfig(sourcefile)
-                local public = (fileconfig and fileconfig.public and not fileconfig.external) or false
-                if public then
-                    sourcefiles = sourcefiles or {}
-                    local flags = compinst:compflags({target = dep, sourcefile = sourcefile, sourcekind = "cxx"})
-                    flags = support.strip_mapper_flags(dep, flags) or {}
-                    table.insert(sourcefiles, {file = sourcefile, external = { reuse = not dep:is_moduleonly(),
-                                                                               moduleonly = dep:is_moduleonly(),
-                                                                               flags = flags,
-                                                                               target = dep }})
+                if not modules or not modules[sourcefile] then
+                    local fileconfig = dep:fileconfig(sourcefile)
+                    local public = (fileconfig and fileconfig.public and not fileconfig.external) or false
+                    if public then
+                        modules = modules or {}
+                        local flags = compinst:compflags({target = dep, sourcefile = sourcefile, sourcekind = "cxx"})
+                        local defines = support.get_defines(flags)
+                        local reuse = target:policy("build.c++.modules.tryreuse") and not dep:is_moduleonly() and _are_flags_compatible(target, dep, sourcefile)
+                        modules[sourcefile] = { moduleonly = dep:is_moduleonly(),
+                                                reused = reuse,
+                                                defines = defines,
+                                                target = dep }
+                    end
                 end
             end
         end
     end
-    return sourcefiles
+    return modules
 end
 

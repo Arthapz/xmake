@@ -31,7 +31,7 @@ import("support")
 import(".builder", {inherit = true})
 
 -- get flags for building a headerunit
-function _make_headerunitflags(target, headerunit, headerunit_mapper, opt)
+function _make_headerunitflags(target, headerunit_mapper, opt)
     local module_headerflag = support.get_moduleheaderflag(target)
     local module_mapperflag = support.get_modulemapperflag(target)
     assert(module_headerflag, "compiler(gcc): does not support c++ header units!")
@@ -47,9 +47,7 @@ function _compile(target, flags, sourcefile, outputfile)
 
     local dryrun = option.get("dry-run")
     local compinst = target:compiler("cxx")
-    local fileconfig = target:fileconfig(sourcefile)
-    local external = fileconfig and fileconfig.external
-    local compflags = (external and external.flags) and external.flags or compinst:compflags({sourcefile = sourcefile, target = target})
+    local compflags = compinst:compflags({sourcefile = sourcefile, target = target, sourcekind = "cxx"})
     flags = table.join(compflags or {}, flags)
 
     -- trace
@@ -67,9 +65,7 @@ end
 -- @note we need to use batchcmds:compilev to translate paths in compflags for generator, e.g. -Ixx
 function _batchcmds_compile(batchcmds, target, flags, sourcefile, outputfile)
     local compinst = target:compiler("cxx")
-    local fileconfig = target:fileconfig(sourcefile)
-    local external = fileconfig and fileconfig.external
-    local compflags = (external and external.flags) and external.flags or compinst:compflags({sourcefile = sourcefile, target = target, sourcekind = "cxx"})
+    local compflags = compinst:compflags({sourcefile = sourcefile, target = target, sourcekind = "cxx"})
     flags = table.join("-c", compflags or {}, flags, {"-o", outputfile, sourcefile})
     batchcmds:compilev(flags, {compiler = compinst, sourcekind = "cxx"})
 end
@@ -201,7 +197,7 @@ function make_module_buildjobs(target, batchjobs, job_name, module, deps, opt)
                     local flags = {"-x", "c++", module_mapperflag .. module_mapper}
                     local fileconfig = target:fileconfig(module.sourcefile)
                     local external = fileconfig and fileconfig.external
-                    if external and not external.reuse and not external.moduleonly then
+                    if external and not external.reused and not external.moduleonly then
                         progress.show(jobopt.progress, "${color.build.target}<%s> ${clear}${color.build.object}compiling.module.bmi.$(mode) %s", target:name(), module.name or module.sourcefile)
                         table.insert(flags, module_onlyflag)
                         table.insert(flags, module_flag)
@@ -251,7 +247,7 @@ function make_module_buildcmds(target, batchcmds, module, opt)
             local fileconfig = target:fileconfig(module.sourcefile)
             local external = fileconfig and fileconfig.external
             table.insert(flags, module_flag)
-            if external and not external.reuse and not external.moduleonly then
+            if external and not external.reused and not external.moduleonly then
                 batchcmds:show_progress(opt.progress, "${color.build.target}<%s> ${clear}${color.build.object}compiling.module.bmi.$(mode) %s", target:name(), module.name or module.sourcefile)
                 table.insert(flags, module_onlyflag)
             else
@@ -286,7 +282,7 @@ function make_headerunit_buildjobs(target, job_name, batchjobs, headerunit, opt)
                 end
                 progress.show(jobopt.progress, "${color.build.target}<%s> ${clear}${color.build.object}compiling.headerunit.$(mode) %s", target:name(), name)
                 _compile(target,
-                         _make_headerunitflags(target, headerunit, headerunit_mapper, opt),
+                         _make_headerunitflags(target, headerunit_mapper, opt),
                          opt.stl_headerunit and headerunit.name or path.translate(headerunit.sourcefile), headerunit.bmifile)
                 os.tryrm(headerunit_mapper)
             end
@@ -309,7 +305,7 @@ function make_headerunit_buildcmds(target, batchcmds, headerunit, opt)
         end
         batchcmds:show_progress(opt.progress, "${color.build.target}<%s> ${clear}${color.build.object}compiling.headerunit.$(mode) %s", target:name(), name)
         _batchcmds_compile(batchcmds, target,
-                    _make_headerunitflags(target, headerunit, headerunit_mapper, opt),
+                    _make_headerunitflags(target, headerunit_mapper, opt),
                opt.stl_headerunit and headerunit.name or path.translate(headerunit.sourcefile), headerunit.bmifile)
         batchcmds:add_depfiles(headerunit.sourcefile)
         batchcmds:rm(headerunit_mapper)

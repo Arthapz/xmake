@@ -37,9 +37,7 @@ function generate_dependency_for(target, sourcefile, opt)
     local depstargetflag = support.get_depstargetflag(target)
     local dependfile = target:dependfile(sourcefile)
     local changed = false
-    local fileconfig = target:fileconfig(sourcefile)
-    local external = fileconfig and fileconfig.external
-    local compflags = external and external.flags or compinst:compflags({sourcefile = sourcefile, target = target, sourcekind = "cxx"})
+    local compflags = compinst:compflags({sourcefile = sourcefile, target = target, sourcekind = "cxx"})
 
     depend.on_changed(function()
 

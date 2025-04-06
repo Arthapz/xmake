@@ -148,13 +148,15 @@ function strip_flags(flags, opt)
     local strippable_flags = {
         "-I",
         "-isystem",
+        "/I",
         "-g",
         "-O",
         "-W",
         "-w",
         "-cxx-isystem",
         "-Q",
-        "-fmodules-ts",
+        "-fmodule-file",
+        "-fPIC",
     }
     if opt and opt.strip_defines then
         table.join2(strippable_flags, {"-D", "-U"})
@@ -167,10 +169,12 @@ function strip_flags(flags, opt)
             if last_flag_I then
                 strip = true
                 last_flag_I = false
+                break
             elseif flag == _flag then
-                last_flag_I = (_flag == "-I" or _flag == "-isystem" or _flag == "-cxx-isystem")
+                last_flag_I = (_flag == "-I" or _flag == "-isystem" or _flag == "-cxx-isystem" or _flag == "/I")
                 strip = true
-            elseif flag:startswith(_flag) or last_flag_I then
+                break
+            elseif flag:startswith(_flag) then
                 strip = true
                 break
             end

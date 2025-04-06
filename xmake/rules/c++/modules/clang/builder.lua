@@ -89,8 +89,8 @@ function _compile(target, flags, sourcefile, outputfile, opt)
     local compinst = target:compiler("cxx")
     local fileconfig = target:fileconfig(sourcefile)
     local external = fileconfig and fileconfig.external
-    local compflags = opt.flags or compinst:compflags({sourcefile = sourcefile, target = target, sourcekind = "cxx"})
-    local flags = table.join(compflags or {}, flags)
+    local compflags = compinst:compflags({sourcefile = sourcefile, target = target, sourcekind = "cxx"})
+    flags = table.join(flags or {}, compflags or {})
 
     -- trace
     if option.get("verbose") then
@@ -108,7 +108,7 @@ end
 function _batchcmds_compile(batchcmds, target, flags, sourcefile, outputfile, opt)
     opt = opt or {}
     local compinst = target:compiler("cxx")
-    local compflags = opt.flags or compinst:compflags({sourcefile = sourcefile, target = target, sourcekind = "cxx"})
+    local compflags = compinst:compflags({sourcefile = sourcefile, target = target, sourcekind = "cxx"})
     flags = table.join("-c", compflags or {}, flags, {"-o", outputfile, opt.bmifile or sourcefile})
     batchcmds:compilev(flags, {compiler = compinst, sourcekind = "cxx"})
 end
@@ -282,22 +282,19 @@ function make_module_buildcmds(target, batchcmds, module, opt)
     -- generate and append module mapper file
     local build = should_build(target, module)
 
-    if build then
+    local fileconfig = target:fileconfig(module.sourcefile)
+    local external = fileconfig and fileconfig.external
+    local reused = external and external.reused
+    if build and not reused then
         if support.has_module_extension(module.sourcefile) then
             batchcmds:mkdir(path.directory(module.objectfile))
-            local fileconfig = target:fileconfig(module.sourcefile)
-            local external = fileconfig and fileconfig.external
-            local flags
             local name = module.name
-            if external and external.flags then
-                flags = table.join(external.flags, _get_requiresflags(target, module) or {})
-            end
-            if external and not external.reuse and not external.moduleonly then
+            if external and not external.moduleonly then
                 batchcmds:show_progress(opt.progress, "${color.build.target}<%s> ${clear}${color.build.object}compiling.module.bmi.$(mode) %s", target:name(), module.name or module.sourcefile)
-                _compile_bmi_step(target, module.bmifile, module.sourcefile, {flags = flags, std = (name == "std" or name == "std.compat"), batchcmds = batchcmds})
+                _compile_bmi_step(target, module.bmifile, module.sourcefile, {std = (name == "std" or name == "std.compat"), batchcmds = batchcmds})
             else
                 batchcmds:show_progress(opt.progress, "${color.build.target}<%s> ${clear}${color.build.object}compiling.module.$(mode) %s", target:name(), module.name or module.sourcefile)
-                _compile_one_step(target, module.bmifile, module.sourcefile, module.objectfile, {flags = flags, std = (name == "std" or name == "std.compat"), batchcmds = batchcmds})
+                _compile_one_step(target, module.bmifile, module.sourcefile, module.objectfile, {std = (name == "std" or name == "std.compat"), batchcmds = batchcmds})
             end
         else
             batchcmds:rm(module.objectfile) -- force rebuild for .cpp files
@@ -340,19 +337,16 @@ end
 
 -- build headerunit file for batchcmds
 function make_headerunit_buildcmds(target, batchcmds, headerunit, opt)
-    local fileconfig = target:fileconfig(headerunit.sourcefile)
-    local external = fileconfig and fileconfig.external
 
     local compinst = compiler.load("cxx", {target = target})
     local compflags = compinst:compflags({sourcefile = headerunit.sourcefile, target = target, sourcekind = "cxx"})
     local depvalues = {compinst:program(), compflags}
 
-    build = should_build(target, headerunit)
+    local build = should_build(target, headerunit)
     if build then
         local name = headerunit.unique and path.filename(headerunit.name) or headerunit.name
-        local flags = external and external.flags or {}
         batchcmds:show_progress(opt.progress, "${color.build.target}<%s> ${clear}${color.build.object}compiling.headerunit.$(mode) %s", target:name(), name)
-        _batchcmds_compile(batchcmds, target, table.join(flags, _make_headerunitflags(target, headerunit)), headerunit.sourcefile, headerunit.bmifile)
+        _batchcmds_compile(batchcmds, target, table.join(_make_headerunitflags(target, headerunit)), headerunit.sourcefile, headerunit.bmifile)
         batchcmds:add_depfiles(headerunit.sourcefile)
     end
     batchcmds:add_depvalues(depvalues)
