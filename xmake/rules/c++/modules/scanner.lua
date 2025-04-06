@@ -117,6 +117,8 @@ function _parse_dependencies_data(target, moduleinfos)
 
             modules = modules or {}
             local module = {objectfile = path.translate(rule["primary-output"]), sourcefile = moduleinfo.sourcefile}
+            local fileconfig = target:fileconfig(module.sourcefile)
+            local external = fileconfig and fileconfig.external
             
             if rule.provides then
                 -- assume rule.provides is always one element on C++
@@ -164,7 +166,7 @@ function _parse_dependencies_data(target, moduleinfos)
                         if not modules[sourcefile] then
                             modules[sourcefile] = module.deps[name]
                             local key = support.get_headerunit_key(target, sourcefile)
-                            modules[sourcefile].bmifile = _get_headerunit_bmifile(target, sourcefile, key)
+                            modules[sourcefile].bmifile = _get_headerunit_bmifile(external and external.target or target, sourcefile, key)
                         elseif modules[sourcefile].name ~= name then
                             modules[sourcefile].aliases = modules[sourcefile].aliases or {}
                             table.insert(modules[sourcefile].aliases, name)
@@ -466,15 +468,11 @@ function sort_modules_by_dependencies(target, modules)
     local sourcefiles_sorted = dag:topological_sort()
     sourcefiles_sorted = table.reverse(sourcefiles_sorted)
     local sourcefiles_sorted_set = hashset.from(sourcefiles_sorted)
-    for _, sourcefile in ipairs(sourcefiles) do
+    for sourcefile, _ in pairs(modules) do
         if not sourcefiles_sorted_set:has(sourcefile) then
             table.insert(sourcefiles_sorted, sourcefile)
             sourcefiles_sorted_set:insert(sourcefile)
         end
-    end
-    -- handle case where dag is empty
-    if #sourcefiles_sorted == 0 then
-        sourcefiles_sorted = {table.keys(modules)[1]}
     end
     -- prepare objectfiles list built by the target
     local culleds
@@ -526,12 +524,13 @@ function sort_modules_by_dependencies(target, modules)
                 insert_objectfile = false
             end
         elseif module.headerunit then
-            local insert = true
             local fileconfig = target:fileconfig(sourcefile)
             if fileconfig then
                 can_cull = fileconfig.cull == nil and can_cull or fileconfig.cull
             end
-            if can_cull then
+            local key = support.get_headerunit_key(target, sourcefile)
+            local insert = (module.bmifile == _get_headerunit_bmifile(target, sourcefile, key)) -- external headerunit ?
+            if insert and can_cull then
                 insert = false
                 local edges = dag:adjacent_edges(sourcefile)
                 if edges then
@@ -564,11 +563,6 @@ function sort_modules_by_dependencies(target, modules)
         end
         if insert then
             table.insert(built_modules, sourcefile)
-            for _, dep in pairs(module.deps) do
-                if dep.headerunit then
-                    table.insert(built_headerunits, dep.sourcefile)
-                end
-            end
         elseif dont_cull then
         elseif not module.headerunit then
             sourcefiles_sorted_set:remove(sourcefile)

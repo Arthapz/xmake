@@ -198,11 +198,13 @@ end
 
 -- get modules cache directory
 function modules_cachedir(target, opt)
-    assert(opt and (opt.named ~= nil or opt.headerunit))
+    assert(opt and (opt.named ~= nil or opt.headerunit or opt.scan))
     local type
     if opt.headerunit then
         type = "headerunit"
     elseif opt.named then
+        type = "nameds"
+    elseif opt.scan then
         type = "nameds"
     else 
         type = "implementation"
@@ -219,10 +221,10 @@ function get_modulehash(target, modulefile, opt)
     return hash.uuid(key):split("-", {plain = true})[1]:lower()
 end
 
-function get_metafile(target, modulefile)
+function get_metafile(target, module)
     -- metafile are only for named modules
-    local outputdir = get_outputdir(target, modulefile, {named = true})
-    return path.join(outputdir, path.filename(modulefile) .. ".meta-info")
+    local outputdir = get_outputdir(target, module.sourcefile, {named = module.interface or false})
+    return path.join(outputdir, path.filename(module.sourcefile) .. ".meta-info")
 end
 
 function get_outputdir(target, modulefile, opt)
@@ -258,7 +260,7 @@ function get_provided_module(module)
     return name, provide, cppfile
 end
 
-function add_installfiles_for_modules(target)
+function add_installfiles_for_modules(target, modules)
     local sourcebatch = target:sourcebatches()["c++.build.modules.install"]
     if sourcebatch and sourcebatch.sourcefiles then
         for _, sourcefile in ipairs(sourcebatch.sourcefiles) do
@@ -268,7 +270,7 @@ function add_installfiles_for_modules(target)
                 local modulehash = get_modulehash(target, sourcefile)
                 local prefixdir = path.join("modules", modulehash)
                 target:add("installfiles", sourcefile, {prefixdir = prefixdir})
-                local metafile = get_metafile(target, sourcefile)
+                local metafile = get_metafile(target, modules[sourcefile])
                 if os.exists(metafile) then
                     target:add("installfiles", metafile, {prefixdir = prefixdir})
                 end

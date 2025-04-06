@@ -90,6 +90,7 @@ function strip_flags(flags, opt)
         "-cxx-isystem",
         "-Q",
         "-fmodule-mapper",
+        "-fmodules-ts"
     }
     if opt and opt.strip_defines then
         table.join2(strippable_flags, {"-D", "-U"})
@@ -103,9 +104,9 @@ function strip_flags(flags, opt)
                 strip = true
                 last_flag_I = false
             elseif flag == _flag then
+                last_flag_I = (_flag == "-I" or _flag == "-isystem" or _flag == "-cxx-isystem")
                 strip = true
             elseif flag:startswith(_flag) or last_flag_I then
-                last_flag_I = (_flag == "-I" or _flag == "-isystem" or _flag == "-cxx-isystem")
                 strip = true
                 break
             end

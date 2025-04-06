@@ -141,14 +141,14 @@ function should_build(target, module)
             local fileconfig = target:fileconfig(dep_module.sourcefile)
             local external = fileconfig and fileconfig.external
             local _target = target
+
             if external and external.target and not external.moduleonly then
                 _target = external.target
             end
 
-            local mapped_dep = get_from_target_mapper(_target, dep_name)
+            local mapped_dep = get_from_target_mapper(_target, dep_module.headerunit and dep_module.sourcefile or dep_name)
             if dep_module.headerunit and mapped_dep.alias_of then
-                local key = support.get_headerunit_key(_target, dep_module.sourcefile)
-                mapped_dep = mapped_dep.alias_of[key]
+                mapped_dep = mapped_dep.alias_of
             end
             if should_build(_target, mapped_dep) then
                 depend.save(dependinfo, dependfile)
@@ -183,7 +183,7 @@ function _generate_meta_module_info(target, name, sourcefile, requires)
 
     local compinst = target:compiler("cxx")
     local flags = support.strip_flags(target, compinst:compflags({sourcefile = sourcefile, target = target, sourcekind = "cxx"})) or {}
-    print("AAAAAAAA", compinst:compflags({sourcefile = sourcefile, target = target, sourcekind = "cxx"}), flags)
+    print(flags)
     local modulehash = support.get_modulehash(target, sourcefile)
     local module_metadata = {name = name, file = path.join(modulehash, path.filename(sourcefile))}
 
@@ -361,7 +361,7 @@ function generate_metadata(target, modules)
     local jobs = option.get("jobs") or os.default_njob()
     runjobs(target:name() .. "_install_modules", function(index, _, jobopt)
         local module = public_modules[index]
-        local metafilepath = support.get_metafile(target, module.sourcefile)
+        local metafilepath = support.get_metafile(target, module)
         progress.show(jobopt.progress, "${color.build.target}<%s> generating.module.metadata %s", target:name(), module.name)
         local metadata = _generate_meta_module_info(target, module.name, module.sourcefile, module.deps)
         json.savefile(metafilepath, metadata)
@@ -400,7 +400,7 @@ function get_target_module_mapper(target)
 end
 
 -- feed the module mapper
-function feed_module_mapper(target, modules, built_modules, built_headerunits)
+function feed_module_mapper(target, modules)
 
     local mapper, keys = get_target_module_mapper(target)
     local compinst = target:compiler("cxx")
@@ -418,11 +418,11 @@ function feed_module_mapper(target, modules, built_modules, built_headerunits)
                 _invalidate_mapper_keys(target)
             end
             mapper[module.name] = mapper[module.name] or {}
-            mapper[module.name].alias_of = mapper[module.name].alias_of or {}
-            mapper[module.name].alias_of[key] = mapper[key]
+            mapper[module.name].alias_of = mapper[key]
+            mapper[module.sourcefile] = mapper[module.sourcefile] or {}
+            mapper[module.sourcefile].alias_of = mapper[key]
             for _, alias in ipairs(module.aliases) do
                 mapper[alias] = {alias_of = mapper[key]}
-                mapper[alias].alias_of[key] = mapper[key]
             end
         elseif module.interface or module.implementation then
             if not keys[module.name] then
@@ -451,8 +451,8 @@ end
 
 -- check if dependencies changed
 function is_dependencies_changed(target, module)
-    local cachekey = target:name() .. module.name
-    local requires = hashset.from(table.keys(module.requires or {}))
+    local cachekey = target:name() .. (module.name or module.sourcefile)
+    local requires = hashset.from(table.keys(module.deps or {}))
     local oldrequires = support.memcache():get2(cachekey, "oldrequires")
     local changed = false
     if oldrequires then
@@ -474,9 +474,10 @@ function clean(target)
     -- we cannot use target:data("cxx.has_modules"),
     -- because on_config will be not called when cleaning targets
     if support.contains_modules(target) then
-        remove_files(support.modules_cachedir(target))
+        remove_files(support.modules_cachedir(target, {named = true}))
+        remove_files(support.modules_cachedir(target, {named = false}))
+        remove_files(support.modules_cachedir(target, {headerunit = true}))
         if option.get("all") then
-            remove_files(support.stlmodules_cachedir(target))
             support.localcache():clear()
             support.localcache():save()
         end
@@ -509,11 +510,22 @@ function main(target, batch, sourcebatch, opt)
 
         support.patch_sourcebatch(target, sourcebatch, opt)
         local modules = scanner.get_module_dependencies(target, sourcebatch, opt)
+        for _, module in pairs(modules) do
+            local fileconfig = target:fileconfig(module.sourcefile)
+            if fileconfig and fileconfig.external and not fileconfig.external.moduleonly then
+                for _, dep in pairs(module.deps) do
+                    if dep.method ~= "by-name" then
+                        target:fileconfig_add(dep.sourcefile, {external = fileconfig.external})
+                    end
+                end
+            end
+        end
 
         if not target:is_moduleonly() then
             -- avoid building non referenced modules
             local built_modules, built_headerunits, objectfiles = scanner.sort_modules_by_dependencies(target, modules)
             sourcebatch.objectfiles = objectfiles
+
 
             -- feed module mapper
             feed_module_mapper(target, modules, built_modules, built_headerunits)

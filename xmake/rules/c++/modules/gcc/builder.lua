@@ -101,8 +101,7 @@ function _get_maplines(target, module)
         local mapline
         if dep_module_mapped.alias_of then
             -- headerunit
-            local key = support.get_headerunit_key(target, dep_module.sourcefile)
-            local headerunit = dep_module_mapped.alias_of[key]
+            local headerunit = dep_module_mapped.alias_of
             local name = headerunit.method == "include-angle" and headerunit.sourcefile or path.join("./", path.directory(module.sourcefile), dep_name)
             mapline = path.unix(name) .. " " .. path.unix(path.absolute(headerunit.bmifile))
         else
@@ -234,13 +233,11 @@ function make_module_buildcmds(target, batchcmds, module, opt)
     -- generate and append module mapper file
     local build = should_build(target, module)
 
-    -- needed to detect rebuild of dependencies
     if build then
         if module.implementation or module.interface or module.deps then
             _generate_modulemapper_file(target, module)
         end
 
-        -- compile if it's a named module
         if option.get("diagnosis") then
             if module.name  then
                 batchcmds:show("mapper file for %s (%s) --------\n%s--------", module.name, module.sourcefile, io.readfile(module_mapper))
@@ -253,10 +250,10 @@ function make_module_buildcmds(target, batchcmds, module, opt)
             local flags = {"-x", "c++", module_mapperflag .. module_mapper}
             local fileconfig = target:fileconfig(module.sourcefile)
             local external = fileconfig and fileconfig.external
+            table.insert(flags, module_flag)
             if external and not external.reuse and not external.moduleonly then
                 batchcmds:show_progress(opt.progress, "${color.build.target}<%s> ${clear}${color.build.object}compiling.module.bmi.$(mode) %s", target:name(), module.name or module.sourcefile)
                 table.insert(flags, module_onlyflag)
-                table.insert(flags, module_flag)
             else
                 batchcmds:show_progress(opt.progress, "${color.build.target}<%s> ${clear}${color.build.object}compiling.module.$(mode) %s", target:name(), module.name or module.sourcefile)
             end

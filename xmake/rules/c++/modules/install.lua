@@ -18,10 +18,24 @@
 -- @file        install.lua
 --
 
-function install()
+import("support")
+import("builder")
 
+function install(target)
+    -- we cannot use target:data("cxx.has_modules"),
+    -- because on_config will be not called when installing targets
+    if support.contains_modules(target) then
+        local modules = support.localcache():get2(target:name(), "c++.modules")
+        builder.generate_metadata(target, modules)
+
+        support.add_installfiles_for_modules(target, modules)
+    end
 end
 
-function uninstall()
-
+function uninstall(target)
+    import("support")
+    if support.contains_modules(target) then
+        local modules = support.localcache():get2(target:name(), "c++.modules")
+        support.add_installfiles_for_modules(target, modules)
+    end
 end

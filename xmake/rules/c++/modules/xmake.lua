@@ -37,9 +37,9 @@ rule("c++.build.modules.builder")
     set_extensions(".mpp", ".mxx", ".cppm", ".ixx")
 
     -- parallel build support to accelerate `xmake build` to build modules
-    before_build_files(function(target, batchjobs, sourcebatch, opt)
-        import("builder")(target, batchjobs, sourcebatch, table.join(opt or {}, {batchjobs = true}))
-    end, {batch = true})
+    -- before_build_files(function(target, batchjobs, sourcebatch, opt)
+    --     import("builder")(target, batchjobs, sourcebatch, table.join(opt or {}, {batchjobs = true}))
+    -- end, {batch = true})
 
     -- serial compilation only, usually used to support project generator
     before_buildcmd_files(function(target, batchcmds, sourcebatch, opt)

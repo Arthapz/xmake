@@ -43,7 +43,7 @@ function generate_dependency_for(target, sourcefile, opt)
 
     depend.on_changed(function()
 
-        local outputdir = support.get_outputdir(target, sourcefile, {named = true})
+        local outputdir = support.get_outputdir(target, sourcefile, {scan = true})
         local jsonfile = path.translate(path.join(outputdir, path.filename(sourcefile) .. ".json"))
         local has_depsflags = depsformatflag and depsfileflag and depstargetflag
         if has_depsflags and not target:policy("build.c++.gcc.fallbackscanner") then
