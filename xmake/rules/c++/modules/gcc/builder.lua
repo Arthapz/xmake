@@ -168,8 +168,8 @@ function make_module_buildjobs(target, batchjobs, job_name, module, deps, opt)
     return {
         name = job_name,
         deps = deps,
-        sourcefile = opt.cppfile,
-        job = batchjobs:newjob(module.name or module.sourcefile, function(_, _, jobopt)
+        sourcefile = module.sourcefile,
+        job = batchjobs:newjob(job_name, function(_, _, jobopt)
             local module_mapper
             if module.implementation or module.interface or module.deps then
                 module_mapper = _get_modulemapper_file(module)
@@ -270,9 +270,6 @@ function make_headerunit_buildjobs(target, job_name, batchjobs, headerunit, opt)
         name = job_name,
         sourcefile = headerunit.path,
         job = batchjobs:newjob(job_name, function(_, _, jobopt)
-            -- local compinst = compiler.load("cxx", {target = target})
-            -- local compflags = compinst:compflags({sourcefile = headerunit.sourcefile, target = target, sourcekind = "cxx"})
-
             local build = should_build(target, headerunit)
             if build then
                 local headerunit_mapper = _generate_headerunit_modulemapper_file(headerunit)
