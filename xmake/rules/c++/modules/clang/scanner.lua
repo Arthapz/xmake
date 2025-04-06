@@ -31,15 +31,16 @@ function generate_dependency_for(target, sourcefile, opt)
     local compinst = target:compiler("cxx")
     local changed = false
     local dependfile = target:dependfile(sourcefile)
-    local flags = compinst:compflags({sourcefile = sourcefile, target = target}) or {}
     local fileconfig = target:fileconfig(sourcefile)
+    local external = fileconfig and fileconfig.external
+    local compflags = external and external.flags or compinst:compflags({sourcefile = sourcefile, target = target, sourcekind = "cxx"})
 
     depend.on_changed(function()
         if opt.progress then
             progress.show(opt.progress, "${color.build.target}<%s> generating.module.deps %s", target:name(), sourcefile)
         end
 
-        local outputdir = support.get_outputdir(target, sourcefile)
+        local outputdir = support.get_outputdir(target, sourcefile, {scan = true})
         local jsonfile = path.translate(path.join(outputdir, path.filename(sourcefile) .. ".json"))
         local has_clangscandepssupport = support.has_clangscandepssupport(target)
         if has_clangscandepssupport and not target:policy("build.c++.clang.fallbackscanner") then
@@ -51,7 +52,7 @@ function generate_dependency_for(target, sourcefile, opt)
             end
             local clangscandeps = support.get_clang_scan_deps(target)
             local dependency_flags = table.join({"--format=p1689", "--",
-                                                 clang_path, "-x", "c++", "-c", sourcefile, "-o", target:objectfile(sourcefile)}, flags)
+                                                 clang_path, "-x", "c++"}, compflags, {"-c", sourcefile, "-o", target:objectfile(sourcefile)})
             if option.get("verbose") then
                 print(os.args(table.join(clangscandeps, dependency_flags)))
             end
@@ -65,11 +66,11 @@ function generate_dependency_for(target, sourcefile, opt)
             end
             fallback_generate_dependencies(target, jsonfile, sourcefile, function(file)
                 local keepsystemincludesflag = support.get_keepsystemincludesflag(target)
-                local compflags = table.clone(flags)
+                local compflags = table.clone(compflags)
                 -- exclude -fmodule* and -std=c++/gnu++* flags because
                 -- when they are set clang try to find bmi of imported modules but they don't exists in this point of compilation
                 table.remove_if(compflags, function(_, flag)
-                    return flag:startswith("-fmodule") or flag:startswith("-std=c++") or flag:startswith("-std=gnu++")
+                    return flag:startswith("-fmodule") or flag:startswith("-fvisibility") or flag:startswith("-std=c++") or flag:startswith("-std=gnu++")
                 end)
                 local ifile = path.translate(path.join(outputdir, path.filename(file) .. ".i"))
                 compflags = table.join(compflags or {}, keepsystemincludesflag or {}, {"-E", "-x", "c++", file, "-o", ifile})
@@ -83,7 +84,7 @@ function generate_dependency_for(target, sourcefile, opt)
 
         local rawdependinfo = io.readfile(jsonfile)
         return {moduleinfo = rawdependinfo}
-    end, {dependfile = dependfile, files = {sourcefile}, changed = target:is_rebuilt(), values = flags})
+    end, {dependfile = dependfile, files = {sourcefile}, changed = target:is_rebuilt(), values = compflags})
     return changed
 end
 

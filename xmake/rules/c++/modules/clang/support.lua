@@ -135,8 +135,14 @@ function load(target)
     end
 end
 
+-- strip module mapper flag
+function strip_mapper_flag(flags)
+    -- no op
+    return flags
+end
+
 -- strip flags that doesn't affect bmi generation
-function strip_flags(target, flags)
+function strip_flags(flags, opt)
     -- speculative list as there is no resource that list flags that prevent reusability, this list will likely be improve over time
     -- @see https://clang.llvm.org/docs/StandardCPlusPlusModules.html#consistency-requirement
     local strippable_flags = {
@@ -148,8 +154,9 @@ function strip_flags(target, flags)
         "-w",
         "-cxx-isystem",
         "-Q",
+        "-fmodules-ts",
     }
-    if not target:policy("build.c++.modules.tryreuse.discriminate_on_defines") then
+    if opt and opt.strip_defines then
         table.join2(strippable_flags, {"-D", "-U"})
     end
     local output = {}
@@ -157,8 +164,13 @@ function strip_flags(target, flags)
     for _, flag in ipairs(flags) do
         local strip = false
         for _, _flag in ipairs(strippable_flags) do
-            if flag:startswith(_flag) or last_flag_I then
-                last_flag_I = _flag == "-I"
+            if last_flag_I then
+                strip = true
+                last_flag_I = false
+            elseif flag == _flag then
+                last_flag_I = (_flag == "-I" or _flag == "-isystem" or _flag == "-cxx-isystem")
+                strip = true
+            elseif flag:startswith(_flag) or last_flag_I then
                 strip = true
                 break
             end
@@ -187,7 +199,7 @@ function toolchain_includedirs(target)
                 runtime_flag = "-stdlib=libstdc++"
             end
         end
-        local _, result = try {function () return os.iorunv(clang, table.join({"-E", "-Wp,-v", "-xc", os.nuldev()}, runtime_flag or {})) end}
+        local _, result = try {function () return os.iorunv(clang, table.join({"-E", "-Wp,-v", "-xc++", os.nuldev()}, runtime_flag or {})) end}
         if result then
             for _, line in ipairs(result:split("\n", {plain = true})) do
                 line = line:trim()
