@@ -27,9 +27,6 @@ import(".support", {inherit = true})
 -- load module support for the current target
 function load(target)
 
-    local msvc = target:toolchain("msvc")
-    local vcvars = msvc:config("vcvars")
-
     -- enable std modules if c++23 by defaults
     if target:data("c++.msvc.enable_std_import") == nil and target:policy("build.c++.modules.std") then
         local languages = target:get("languages")
@@ -56,19 +53,17 @@ function load(target)
     end
 end
 
--- strip flags that doesn't affect bmi generation
-function strip_flags(target, flags)
+-- flags that doesn't affect bmi generation
+function strippeable_flags()
     -- speculative list as there is no resource that list flags that prevent reusability, this list will likely be improve over time
     -- @see https://learn.microsoft.com/en-us/cpp/build/reference/compiler-options-listed-alphabetically?view=msvc-170
-    local strippable_flags = {
-        "I",
+    local strippeable_flags = {
         "TP",
         "errorReport",
         "W",
         "w",
         "sourceDependencies",
         "scanDependencies",
-        "reference",
         "PD",
         "nologo",
         "MP",
@@ -76,10 +71,8 @@ function strip_flags(target, flags)
         "interface",
         "ifcOutput",
         "help",
-        "headerUnit",
         "headerName",
         "Fp",
-        "Fo",
         "Fm",
         "Fe",
         "Fd",
@@ -94,24 +87,15 @@ function strip_flags(target, flags)
         "analyze",
         "?",
     }
-    if not target:policy("build.c++.modules.tryreuse.discriminate_on_defines") then
-        table.join2(strippable_flags, {"D", "U"})
-    end
-    local output = {}
-    for _, flag in ipairs(flags) do
-        local strip = false
-        for _, _flag in ipairs(strippable_flags) do
-            if flag:startswith("cl::-" .. _flag) or flag:startswith("cl::/" .. _flag) or
-               flag:startswith("-" .. _flag) or flag:startswith("/" .. _flag) then
-                strip = true
-                break
-            end
-        end
-        if not strip then
-            table.insert(output, flag)
-        end
-    end
-    return output
+
+    local splitted_strippeable_flags = {
+        "Fo",
+        "I",
+        "reference",
+        "headerUnit",
+    }
+
+    return strippeable_flags, splitted_strippeable_flags
 end
 
 -- provide toolchain include dir for stl headerunit when p1689 is not supported

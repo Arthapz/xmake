@@ -71,7 +71,45 @@ end
 
 -- strip flags not relevent for module reuse
 function strip_flags(target, flags, opt)
-    return _support(target).strip_flags(flags, opt)
+    local strippeable_flags, splitted_strippeable_flags =  _support(target).strippeable_flags()
+    
+    if opt and opt.strip_defines then
+        table.join2(splitted_strippeable_flags, {"D", "U"})
+    end
+
+    local splitted_strippeable_flags_set = hashset.new()
+    for _, flag in ipairs(splitted_strippeable_flags) do
+        table.insert(strippeable_flags, flag)
+        splitted_strippeable_flags_set:insert("/" .. flag)
+        splitted_strippeable_flags_set:insert("-" .. flag)
+    end
+    
+    local output = {}
+    local strip_next_flag = false
+    for _, flag in ipairs(flags) do
+        local strip = false
+
+        if strip_next_flag then
+            strip = true
+            strip_next_flag = false
+        else
+            for _, _flag in ipairs(strippeable_flags) do
+                if (flag == "/" .. _flag) or (flag == "-" .. _flag) then
+                    strip = true
+                    strip_next_flag = splitted_strippeable_flags_set:has(flag)
+                    break
+                elseif flag:startswith("/" .. _flag) or flag:startswith("-" .. _flag) then
+                    strip = true
+                    break
+                end
+            end
+        end
+
+        if not strip then
+            table.insert(output, flag)
+        end
+    end
+    return output
 end
 
 -- strip flags not relevent for module reuse

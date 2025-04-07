@@ -78,44 +78,25 @@ function strip_mapper_flag(flags)
     return output
 end
 
--- strip flags that doesn't affect bmi generation
-function strip_flags(flags, opt)
+-- flags that doesn't affect bmi generation
+function strippeable_flags()
     -- speculative list as there is no resource that list flags that prevent reusability, this list will likely be improve over time
-    local strippable_flags = {
-        "-I",
-        "-isystem",
+    local strippeable_flags = {
         "-O",
         "-W",
         "-w",
-        "-cxx-isystem",
         "-Q",
         "-fmodule-mapper",
         "-fmodules-ts"
     }
-    if opt and opt.strip_defines then
-        table.join2(strippable_flags, {"-D", "-U"})
-    end
-    local output = {}
-    local last_flag_I = false
-    for _, flag in ipairs(flags) do
-        local strip = false
-        for _, _flag in ipairs(strippable_flags) do
-            if last_flag_I then
-                strip = true
-                last_flag_I = false
-            elseif flag == _flag then
-                last_flag_I = (_flag == "-I" or _flag == "-isystem" or _flag == "-cxx-isystem")
-                strip = true
-            elseif flag:startswith(_flag) or last_flag_I then
-                strip = true
-                break
-            end
-        end
-        if not strip then
-            table.insert(output, flag)
-        end
-    end
-    return output
+
+    local splitted_strippeable_flags = {
+        "-I",
+        "-isystem",
+        "-cxx-isystem",
+    }
+
+    return strippeable_flags, splitted_strippeable_flags
 end
 
 -- provide toolchain include directories for stl headerunit when p1689 is not supported
