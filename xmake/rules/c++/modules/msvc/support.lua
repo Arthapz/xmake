@@ -141,7 +141,7 @@ function get_stdmodules(target)
                     local stdmodulesdir = path.join(vcvars.VCInstallDir, "Tools", "MSVC", vcvars.VCToolsVersion, "modules")
                     assert(stdmodulesdir, "Can't enable C++23 std modules, directory missing !")
 
-                    return {path.join(stdmodulesdir, "std.ixx"), path.join(stdmodulesdir, "std.compat.ixx")}
+                    return {path.normalize(path.join(stdmodulesdir, "std.ixx")), path.normalize(path.join(stdmodulesdir, "std.compat.ixx"))}
                 end
             end
         end

@@ -297,7 +297,7 @@ function get_stdmodules(target)
                             std_module_directory = path.join(path.directory(modules_json_path), std_module_directory)
                         end
                         if os.isdir(std_module_directory) then
-                            return {path.join(std_module_directory, "std.cppm"), path.join(std_module_directory, "std.compat.cppm")}
+                            return {path.normalize(path.join(std_module_directory, "std.cppm")), path.normalize(path.join(std_module_directory, "std.compat.cppm"))}
                         end
                     end
                 end
@@ -314,7 +314,7 @@ function get_stdmodules(target)
                         if vcvars.VCInstallDir and vcvars.VCToolsVersion then
                             local stdmodulesdir = path.join(vcvars.VCInstallDir, "Tools", "MSVC", vcvars.VCToolsVersion, "modules")
                             if os.isdir(stdmodulesdir) then
-                                return {path.join(stdmodulesdir, "std.ixx"), path.join(stdmodulesdir, "std.compat.ixx")}
+                                return {path.normalize(path.join(stdmodulesdir, "std.ixx")), path.normalize(path.join(stdmodulesdir, "std.compat.ixx"))}
                             end
                         end
                     end
