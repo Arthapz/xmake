@@ -110,6 +110,7 @@ end
 }]]
 function _parse_dependencies_data(target, moduleinfos)
     local modules
+    local modules_names = hashset.new()
     for _, moduleinfo in ipairs(moduleinfos) do
         assert(moduleinfo.version <= 1)
         for _, rule in ipairs(moduleinfo.rules) do
@@ -128,6 +129,7 @@ function _parse_dependencies_data(target, moduleinfos)
                     assert(provide["logical-name"])
 
                     module.name = provide["logical-name"]
+                    modules_names:insert(module.name)
                     module.sourcefile = module.sourcefile or path.normalize(provide["source-path"])
                     module.interface = provide["is-interface"] == nil and true or provide["is-interface"]
                     module.implementation = not module.interface
@@ -181,6 +183,14 @@ function _parse_dependencies_data(target, moduleinfos)
 
             assert(module.sourcefile)
             modules[module.sourcefile] = module
+        end
+    end
+    -- check if a dependency is missing
+    for _, module in pairs(modules) do
+        for dep_name, dep in pairs(module.deps) do
+            if dep.method == "by-name" then
+                assert(modules_names:has(dep_name), format("missing %s dependency for module %s", dep_name, module.name or module.sourcefile))
+            end
         end
     end
     return modules
