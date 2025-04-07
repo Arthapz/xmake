@@ -307,7 +307,7 @@ function get_stdmodules(target)
                 -- msstl std module file is not compatible with llvm < 19
                 local clang_version = get_clang_version(target)
                 if clang_version and semver.compare(clang_version, "19.0") >= 0 then
-                    local toolchain = target:toolchain("clang") or target:toolchain("clang-cl")
+                    local toolchain = target:toolchain("llvm") or target:toolchain("clang") or target:toolchain("clang-cl")
                     local msvc = import("core.tool.toolchain", {anonymous = true}).load("msvc", {plat = toolchain:plat(), arch = toolchain:arch()})
                     if msvc and msvc:check() then
                         local vcvars = msvc:config("vcvars")
@@ -422,7 +422,7 @@ function get_prebuiltmodulepathflag(target)
     end
     return prebuiltmodulepathflag or nil
 end
-
+ 
 function get_modulecachepathflag(target)
     local modulecachepathflag = _g.modulecachepathflag
     if modulecachepathflag == nil then
