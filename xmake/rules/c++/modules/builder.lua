@@ -154,9 +154,6 @@ function should_build(target, module)
             if should_build(_target, mapped_dep) then
                 depend.save(dependinfo, dependfile)
                 support.memcache():set2(target:name(), "should_build_" .. module.sourcefile, true)
-                if external and external.target then
-                    external.target = nil
-                end
                 return true
             end
         end
