@@ -559,7 +559,7 @@ function sort_modules_by_dependencies(target, modules)
         else
             -- if the module is not a named module, we always insert it
             insert = true
-            insert_objectfile = true
+            insert_objectfile = support.has_module_extension(sourcefile)
         end
 
         -- if module not culled build it, if not notify that the module has been culled
@@ -603,7 +603,7 @@ function _are_flags_compatible(target, other, sourcefile)
 
     local compinst2 = other:compiler("cxx")
     local flags2 = compinst2:compflags({sourcefile = sourcefile, target = other, sourcekind = "cxx"})
-
+    
     local strip_defines = not target:policy("build.c++.modules.tryreuse.discriminate_on_defines")
     
     -- strip unrelevent flags

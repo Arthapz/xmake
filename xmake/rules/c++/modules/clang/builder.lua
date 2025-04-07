@@ -76,7 +76,7 @@ function _make_headerunitflags(target, headerunit)
     assert(module_headerflag, "compiler(clang): does not support c++ header units!")
 
     local local_directory = (headerunit.type == ":quote") and {"-I" .. path.directory(headerunit.path)} or {}
-    local headertype = (headerunit.type == ":angle") and "system" or "user"
+    local headertype = (headerunit.method == "include-quote") and "system" or "user"
     local flags = table.join(local_directory, {"-xc++-header", "-Wno-everything", module_headerflag .. headertype})
     return flags
 end
@@ -273,6 +273,7 @@ function make_module_buildcmds(target, batchcmds, module, opt)
         end
         batchcmds:add_depfiles(module.sourcefile)
     end
+    return os.mtime(module.objectfile)
 end
 
 -- build headerunit file for batchjobs
