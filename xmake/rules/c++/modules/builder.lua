@@ -50,6 +50,8 @@ function _build_headerunits(headerunits, opt)
     for _, headerunit in ipairs(headerunits) do
         opt.build_headerunit(headerunit)
     end
+function _builder(target)
+    return support.import_implementation_of(target, "builder")
 end
 
 -- check if flags are compatible for module reuse
@@ -199,25 +201,6 @@ end
 function _target_module_map_cachekey(target)
     local mode = config.mode()
     return target:name() .. "module_mapper" .. (mode or "")
-end
-
-function _builder(target)
-    local cachekey = tostring(target)
-    local builder = support.memcache():get2("builder", cachekey)
-    if builder == nil then
-        if target:has_tool("cxx", "clang", "clangxx", "clang_cl") then
-            builder = import("clang.builder", {anonymous = true})
-        elseif target:has_tool("cxx", "gcc", "gxx") then
-            builder = import("gcc.builder", {anonymous = true})
-        elseif target:has_tool("cxx", "cl") then
-            builder = import("msvc.builder", {anonymous = true})
-        else
-            local _, toolname = target:tool("cxx")
-            raise("compiler(%s): does not support c++ module!", toolname)
-        end
-        support.memcache():set2("builder", cachekey, builder)
-    end
-    return builder
 end
 
 function mark_build(target, key)

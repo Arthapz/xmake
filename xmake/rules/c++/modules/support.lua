@@ -26,6 +26,9 @@ import("core.project.project")
 import("core.project.config")
 
 function _support(target)
+    return import_implementation_of(target, "support")
+end
+
     local cachekey = tostring(target)
     local support = memcache():get2("support", cachekey)
     if support == nil then
@@ -347,4 +350,3 @@ function add_installfiles_for_modules(target, modules)
         end
     end
 end
-
