@@ -36,7 +36,7 @@ function import_implementation_of(target, name)
     if implementation == nil then
         if target:has_tool("cxx", "clang", "clangxx", "clang_cl") then
             implementation = import("clang." .. name, {anonymous = true})
-        elseif target:has_tool("cxx", "gcc", "gxx") then
+        elseif target:has_tool("cxx", "gcc.", "gxx") then
             implementation = import("gcc" .. name, {anonymous = true})
         elseif target:has_tool("cxx", "cl") then
             implementation = import("msvc." .. name, {anonymous = true})
