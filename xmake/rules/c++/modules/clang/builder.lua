@@ -69,6 +69,14 @@ function _compile_bmi_step(target, bmifile, sourcefile, opt)
     end
 end
 
+function _compile_objectfile_step(target, bmifile, sourcefile, objectfile, opt)
+    if opt and opt.batchcmds then
+        _batchcmds_compile(opt.batchcmds, target, {}, sourcefile, objectfile, {bmifile = bmifile})
+    else
+        _compile(target, {}, sourcefile, objectfile, {bmifile = bmifile})
+    end
+end
+
 -- get flags for building a headerunit
 function _make_headerunitflags(target, headerunit)
 
