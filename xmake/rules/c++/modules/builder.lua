@@ -15,7 +15,7 @@
 -- Copyright (C) 2015-present, TBOOX Open Source Group.
 --
 -- @author      ruki, Arthapz
--- @file        common.lua
+-- @file        builder.lua
 --
 
 -- imports
@@ -33,29 +33,13 @@ import("utils.progress")
 import("support")
 import("scanner")
 
--- build target modules
-function _build_modules(target, modules, built_modules, opt)
-    if not opt.batchjobs then
-        built_modules = table.reverse(built_modules)
-    end
-    for _, sourcefile in ipairs(built_modules) do
-        local module = modules[sourcefile]
-
-        opt.build_module(module, sourcefile, get_from_target_mapper(target, module.name).objectfile)
-    end
-end
-
--- build target headerunits
-function _build_headerunits(headerunits, opt)
-    for _, headerunit in ipairs(headerunits) do
-        opt.build_headerunit(headerunit)
-    end
 function _builder(target)
     return support.import_implementation_of(target, "builder")
 end
 
 -- check if flags are compatible for module reuse
 function _are_flags_compatible(target, other, cppfile)
+
     local compinst1 = target:compiler("cxx")
     local flags1 = compinst1:compflags({sourcefile = cppfile, target = target})
 
@@ -81,40 +65,6 @@ function _are_flags_compatible(target, other, cppfile)
         end
     end
     return true
-end
-
--- try to reuse modules from other target
-function _try_reuse_modules(target, modules)
-    for _, module in pairs(modules) do
-        local name, provide, cppfile = support.get_provided_module(module)
-        if not provide then
-            goto continue
-        end
-
-        cppfile = cppfile or module.cppfile
-
-        local fileconfig = target:fileconfig(cppfile)
-        local public = fileconfig and (fileconfig.public or fileconfig.external)
-        if not public then
-            goto continue
-        end
-
-        for _, dep in ipairs(target:orderdeps()) do
-            if not _are_flags_compatible(target, dep, cppfile) then
-                goto nextdep
-            end
-            local mapped = get_from_target_mapper(dep, name)
-            if mapped then
-                support.memcache():set2(target:name() .. name, "reuse", true)
-                add_module_to_target_mapper(target, mapped.name, mapped.sourcefile, mapped.bmifile, table.join(mapped.opt or {}, {target = dep}))
-                break
-            end
-            ::nextdep::
-        end
-
-        ::continue::
-    end
-    return modules
 end
 
 -- should we build this module or headerunit ?
@@ -198,19 +148,6 @@ function _generate_meta_module_info(target, module)
     return module_metadata
 end
 
-function _target_module_map_cachekey(target)
-    local mode = config.mode()
-    return target:name() .. "module_mapper" .. (mode or "")
-end
-
-function mark_build(target, key)
-    support.memcache():set2(key, "_is_built", target:name(), true)
-end
-
-function is_built(target, key)
-    return support.memcache():get2(key .. "_is_built", target:name())
-end
-
 -- build batchjobs for modules
 function build_batchjobs_for_modules(modules, batchjobs, rootjob)
     return buildjobs(modules, batchjobs, rootjob)
@@ -218,6 +155,7 @@ end
 
 -- build modules for batchjobs
 function build_modules_for_batchjobs(target, batchjobs, modules, built_modules, opt)
+
     opt.rootjob = batchjobs:group_leave() or opt.rootjob
     batchjobs:group_enter(target:name() .. "/build_cxxmodules", {rootjob = opt.rootjob})
 
@@ -252,14 +190,11 @@ function build_modules_for_batchcmds(target, batchcmds, modules, built_modules, 
     -- build modules
     built_modules = table.reverse(built_modules)
     local builder = _builder(target)
-
     for _, sourcefile in ipairs(built_modules) do
         local module = modules[sourcefile]
-
         depmtime = math.max(depmtime,
             builder.make_module_buildcmds(target, batchcmds, module, opt))
     end
-
     batchcmds:set_depmtime(depmtime)
 end
 
@@ -297,7 +232,6 @@ function build_headerunits_for_batchjobs(target, batchjobs, modules, built_heade
           jobs[job_name] = job
         end
     end
-
     return jobs
 end
 
@@ -308,7 +242,6 @@ function build_headerunits_for_batchcmds(target, batchcmds, modules, built_heade
     if not headerunits and not stl_headerunits then
        return
     end
-
     local builder = _builder(target)
     -- build stl header units first as other headerunits may need them
     opt.stl_headerunit = true
@@ -355,6 +288,7 @@ end
 
 -- get or create a target module mapper
 function get_target_module_mapper(target)
+
     local memcache = support.memcache()
     local mapper = memcache:get2(target:name(), "module_mapper")
     if not mapper then
@@ -413,17 +347,6 @@ function feed_module_mapper(target, modules)
     end
 end
 
--- add a module to target mapper
-function add_module_to_target_mapper(target, module, flags)
-    local mapper, keys = get_target_module_mapper(target)
-end
-
--- add a headerunit to target mapper
-function add_headerunit_to_target_mapper(target, module, key)
-    local mapper, keys = get_target_module_mapper(target)
-
-end
-
 -- get a module from target mapper by name
 function get_from_target_mapper(target, key)
     local mapper = get_target_module_mapper(target)
@@ -432,6 +355,7 @@ end
 
 -- check if dependencies changed
 function is_dependencies_changed(target, module)
+
     local cachekey = target:name() .. (module.name or module.sourcefile)
     local requires = hashset.from(table.keys(module.deps or {}))
     local oldrequires = support.memcache():get2(cachekey, "oldrequires")
@@ -452,6 +376,7 @@ function is_dependencies_changed(target, module)
 end
 
 function clean(target)
+
     -- we cannot use target:data("cxx.has_modules"),
     -- because on_config will be not called when cleaning targets
     if support.contains_modules(target) then

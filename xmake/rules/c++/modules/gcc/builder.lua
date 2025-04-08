@@ -32,6 +32,7 @@ import(".builder", {inherit = true})
 
 -- get flags for building a headerunit
 function _make_headerunitflags(target, headerunit_mapper, opt)
+
     local module_headerflag = support.get_moduleheaderflag(target)
     local module_mapperflag = support.get_modulemapperflag(target)
     assert(module_headerflag, "compiler(gcc): does not support c++ header units!")
@@ -77,6 +78,7 @@ end
 
 -- generate a module mapper file for build a headerunit
 function _generate_headerunit_modulemapper_file(headerunit)
+
     local mapper_path = path.join(path.directory(headerunit.bmifile), path.filename(headerunit.sourcefile) .. ".mapper.txt")
     local mapper_file = io.open(mapper_path, "wb")
     mapper_file:write("root " .. path.directory(headerunit.sourcefile) .. "\n")
@@ -87,6 +89,7 @@ function _generate_headerunit_modulemapper_file(headerunit)
 end
 
 function _get_maplines(target, module)
+
     local maplines = {}
     if module.interface or module.implementation then
         table.insert(maplines, module.name .. " " .. path.absolute(module.bmifile))
@@ -127,6 +130,7 @@ end
 -- hello build/.gens/stl_headerunit/linux/x86_64/release/rules/modules/cache/hello.gcm
 --
 function _generate_modulemapper_file(target, module)
+
     local maplines = _get_maplines(target, module)
     local mapper_path = _get_modulemapper_file(module)
     if os.isfile(mapper_path) then
@@ -144,27 +148,12 @@ function _generate_modulemapper_file(target, module)
     return mapper_path
 end
 
--- get defines for a module
-function get_module_required_defines(target, sourcefile)
-    local compinst = compiler.load("cxx", {target = target})
-    local compflags = compinst:compflags({sourcefile = sourcefile, target = target})
-    local defines
-    for _, flag in ipairs(compflags) do
-        if flag:startswith("-D") then
-            defines = defines or {}
-            table.insert(defines, flag:sub(3))
-        end
-    end
-    return defines
-end
-
 -- build module file for batchjobs
 function make_module_buildjobs(target, batchjobs, job_name, module, deps, opt)
 
     local module_mapperflag = support.get_modulemapperflag(target)
     local module_onlyflag = support.get_moduleonlyflag(target)
     local module_flag = support.get_modulesflag(target)
-
     return {
         name = job_name,
         deps = deps,
@@ -265,8 +254,8 @@ end
 
 -- build headerunit file for batchjobs
 function make_headerunit_buildjobs(target, job_name, batchjobs, headerunit, opt)
-    local opt = table.clone(opt)
 
+    local opt = table.clone(opt)
     return {
         name = job_name,
         sourcefile = headerunit.sourcefile,

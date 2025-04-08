@@ -27,7 +27,6 @@ function install(target)
     if support.contains_modules(target) then
         local modules = support.localcache():get2(target:name(), "c++.modules")
         builder.generate_metadata(target, modules)
-
         support.add_installfiles_for_modules(target, modules)
     end
 end

@@ -32,6 +32,7 @@ function _scanner(target)
 end
 
 function _parse_meta_info(metafile)
+
     local metadata = json.loadfile(metafile)
     if metadata.file and metadata.name then
         return metadata.file, metadata.name, metadata
@@ -94,6 +95,7 @@ end
   }
 }]]
 function _parse_dependencies_data(target, moduleinfos)
+
     local modules
     local modules_names = hashset.new()
     for _, moduleinfo in ipairs(moduleinfos) do
@@ -105,7 +107,7 @@ function _parse_dependencies_data(target, moduleinfos)
             local module = {objectfile = path.translate(rule["primary-output"]), sourcefile = moduleinfo.sourcefile}
             local fileconfig = target:fileconfig(module.sourcefile)
             local external = fileconfig and fileconfig.external
-            
+
             if rule.provides then
                 -- assume rule.provides is always one element on C++
                 -- @see https://www.open-std.org/jtc1/sc22/wg21/docs/papers/2022/p1689r5.html
@@ -120,7 +122,7 @@ function _parse_dependencies_data(target, moduleinfos)
                     module.implementation = not module.interface
 
                     -- XMake handle bmifile so we don't need rely on compiler-module-path
-                    local fileconfig = target:fileconfig(module.sourcefile)
+                    fileconfig = target:fileconfig(module.sourcefile)
                     local defines
                     local module_target = target
                     if fileconfig and fileconfig.external then
@@ -183,6 +185,7 @@ end
 
 -- generate edges for DAG
 function _get_edges(nodes, modules)
+    
   local edges = {}
   local name_filemap = {}
   local deps_names = hashset.new()
@@ -212,42 +215,24 @@ function _get_edges(nodes, modules)
 end
 
 function _get_package_modules(package)
-    local package_modules
 
+    local package_modules
     local modulesdir = path.join(package:installdir(), "modules")
     local metafiles = os.files(path.join(modulesdir, "*", "*.meta-info"))
     for _, metafile in ipairs(metafiles) do
         package_modules = package_modules or {}
         local modulefile, _, metadata = _parse_meta_info(metafile)
 
-        -- -- patch flags with include directories
-        -- local defines = compinst:compflags({target = target, sourcekind = "cxx"}) or {}
-        -- local is_includeflag = false
-        -- local includeflags = {}
-        -- for _, flag in ipairs(flags) do
-        --     if is_includeflag then
-        --         table.insert(includeflags, flag)
-        --         is_includeflag = false
-        --     elseif flag == "-I" or flag == "-isystem" or flag == "/I" then
-        --         table.insert(includeflags, flag)
-        --         is_includeflag = true
-        --     elseif flag:startswith("-I") or flag:startswith("-isystem") or flag:startswith("/I") then
-        --         table.insert(includeflags, flag)
-        --     end
-        -- end
-        -- metadata.defines = table.join(metadata.flags, includeflags)
-        -- metadata.defines = defines
-        
         local moduleonly = not package:libraryfiles()
         package_modules[path.join(modulesdir, modulefile)] = {defines = metadata.defines,
                                                               moduleonly = moduleonly}
     end
-
     return package_modules
 end
 
 -- generate dependency files
 function _generate_dependencies(target, sourcebatch, opt)
+
     local changed = false
     if opt.progress then
         if type(opt.progress) == "table" then
@@ -270,8 +255,40 @@ function _generate_dependencies(target, sourcebatch, opt)
     end
     return changed
 end
+
+-- check if flags are compatible for module reuse
+function _are_flags_compatible(target, other, sourcefile)
+
+    local compinst1 = target:compiler("cxx")
+    local flags1 = compinst1:compflags({sourcefile = sourcefile, target = target, sourcekind = "cxx"})
+
+    local compinst2 = other:compiler("cxx")
+    local flags2 = compinst2:compflags({sourcefile = sourcefile, target = other, sourcekind = "cxx"})
+
+    local strip_defines = not target:policy("build.c++.modules.tryreuse.discriminate_on_defines")
+
+    -- strip unrelevent flags
+    flags1 = support.strip_flags(target, flags1, {strip_defines = strip_defines})
+    flags2 = support.strip_flags(target, flags2, {strip_defines = strip_defines})
+
+    if #flags1 ~= #flags2 then
+        return false
+    end
+
+    table.sort(flags1)
+    table.sort(flags2)
+
+    for i = 1, #flags1 do
+        if flags1[i] ~= flags2[i] then
+            return false
+        end
+    end
+    return true
+end
+
 -- get module dependencies
 function get_module_dependencies(target, sourcebatch, opt)
+
     local cachekey = target:name() .. "/" .. sourcebatch.rulename
     local modules = support.memcache():get2("modules", cachekey)
     if modules == nil then
@@ -291,6 +308,7 @@ end
 
 -- get headerunits info
 function sort_headerunits(modules, headerunits)
+
     local _headerunits
     local stl_headerunits
     for _, headerunit in ipairs(headerunits) do
@@ -337,6 +355,7 @@ end
   ]
 }]]
 function fallback_generate_dependencies(target, jsonfile, sourcefile, preprocess_file)
+
     local output = {version = 1, revision = 0, rules = {}}
     local rule = {outputs = {jsonfile}}
     rule["primary-output"] = target:objectfile(sourcefile)
@@ -380,7 +399,7 @@ function fallback_generate_dependencies(target, jsonfile, sourcefile, preprocess
                 module_depname = module_depname:sub(2, -2)
                 module_dep["lookup-method"] = "include-quote"
                 module_dep["unique-on-source-path"] = true
-                module_dep["source-path"] = support.find_quote_header_file(target, sourcefile, module_depname)
+                module_dep["source-path"] = support.find_quote_header_file(sourcefile, module_depname)
             elseif module_depname:startswith("<") then
                 module_depname = module_depname:sub(2, -2)
                 module_dep["lookup-method"] = "include-angle"
@@ -435,6 +454,7 @@ end
 
 -- topological sort
 function sort_modules_by_dependencies(target, modules)
+
     local built_modules = {}
     local built_headerunits = {}
     local objectfiles = {}
@@ -581,37 +601,9 @@ function sort_modules_by_dependencies(target, modules)
     return built_modules, table.unique(built_headerunits), objectfiles
 end
 
--- check if flags are compatible for module reuse
-function _are_flags_compatible(target, other, sourcefile)
-    local compinst1 = target:compiler("cxx")
-    local flags1 = compinst1:compflags({sourcefile = sourcefile, target = target, sourcekind = "cxx"})
-
-    local compinst2 = other:compiler("cxx")
-    local flags2 = compinst2:compflags({sourcefile = sourcefile, target = other, sourcekind = "cxx"})
-    
-    local strip_defines = not target:policy("build.c++.modules.tryreuse.discriminate_on_defines")
-    
-    -- strip unrelevent flags
-    flags1 = support.strip_flags(target, flags1, {strip_defines = strip_defines})
-    flags2 = support.strip_flags(target, flags2, {strip_defines = strip_defines})
-
-    if #flags1 ~= #flags2 then
-        return false
-    end
-
-    table.sort(flags1)
-    table.sort(flags2)
-
-    for i = 1, #flags1 do
-        if flags1[i] ~= flags2[i] then
-            return false
-        end
-    end
-    return true
-end
-
 -- get source modulefile for external target deps
 function get_targetdeps_modules(target)
+
     local modules
     local pkg_modules = get_all_packages_modules(target)
     if pkg_modules then

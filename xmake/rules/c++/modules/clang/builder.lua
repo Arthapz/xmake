@@ -31,36 +31,24 @@ import("support")
 import(".builder", {inherit = true})
 
 function _compile_one_step(target, bmifile, sourcefile, objectfile, opt)
+
     local module_outputflag = support.get_moduleoutputflag(target)
-    if opt.is_mapped_bmi then
-        -- get flags
-        if module_outputflag then
-            local flags = table.join(opt.std and {"-Wno-include-angled-in-module-purview", "-Wno-reserved-module-identifier"} or {})
-            if opt and opt.batchcmds then
-                _batchcmds_compile(opt.batchcmds, target, flags, bmifile, objectfile, opt)
-            else
-                _compile(target, flags, bmifile, objectfile)
-            end
+    -- get flags
+    if module_outputflag then
+        local flags = table.join({"-x", "c++-module", module_outputflag .. bmifile}, opt.std and {"-Wno-include-angled-in-module-purview", "-Wno-reserved-module-identifier"} or {})
+        if opt and opt.batchcmds then
+            _batchcmds_compile(opt.batchcmds, target, flags, sourcefile, objectfile, opt)
         else
-            _compile_objectfile_step(target, bmifile, sourcefile, objectfile, opt)
+            _compile(target, flags, sourcefile, objectfile, opt)
         end
     else
-        -- get flags
-        if module_outputflag then
-            local flags = table.join({"-x", "c++-module", module_outputflag .. bmifile}, opt.std and {"-Wno-include-angled-in-module-purview", "-Wno-reserved-module-identifier"} or {})
-            if opt and opt.batchcmds then
-                _batchcmds_compile(opt.batchcmds, target, flags, sourcefile, objectfile, opt)
-            else
-                _compile(target, flags, sourcefile, objectfile, opt)
-            end
-        else
-            _compile_bmi_step(target, bmifile, sourcefile, opt)
-            _compile_objectfile_step(target, bmifile, sourcefile, objectfile, opt)
-        end
+        _compile_bmi_step(target, bmifile, sourcefile, opt)
+        _compile_objectfile_step(target, bmifile, sourcefile, objectfile, opt)
     end
 end
 
 function _compile_bmi_step(target, bmifile, sourcefile, opt)
+
     local flags = table.join({"-x", "c++-module", "--precompile"}, opt.std and {"-Wno-include-angled-in-module-purview", "-Wno-reserved-module-identifier"} or {})
     if opt and opt.batchcmds then
         _batchcmds_compile(opt.batchcmds, target, flags, sourcefile, bmifile, opt)
@@ -167,6 +155,7 @@ function _get_requiresflags(target, module)
 end
 
 function _append_requires_flags(target, module)
+
     local cxxflags = {}
     local requiresflags = _get_requiresflags(target, module)
     for _, flag in ipairs(requiresflags) do
@@ -180,38 +169,10 @@ function _append_requires_flags(target, module)
     target:fileconfig_add(module.sourcefile, {force = {cxxflags = cxxflags}})
 end
 
--- populate module map
-function populate_module_map(target, modules)
-    local clang_version = support.get_clang_version(target)
-    local support_namedmodule = semver.compare(clang_version, "16.0") >= 0
-    for _, module in pairs(modules) do
-        local name, provide, cppfile = support.get_provided_module(module)
-        if provide then
-            local bmifile = support.get_bmi_path(provide.bmi)
-            add_module_to_target_mapper(target, name, cppfile, bmifile, {deps = module.requires, namedmodule = support_namedmodule})
-        end
-    end
-end
-
--- get defines for a module
-function get_module_required_defines(target, sourcefile)
-    local compinst = compiler.load("cxx", {target = target})
-    local compflags = compinst:compflags({sourcefile = sourcefile, target = target})
-    local defines
-    for _, flag in ipairs(compflags) do
-        if flag:startswith("-D") then
-            defines = defines or {}
-            table.insert(defines, flag:sub(3))
-        end
-    end
-    return defines
-end
-
 -- build module file for batchjobs
 function make_module_buildjobs(target, batchjobs, job_name, module, deps, opt)
 
     local dryrun = option.get("dry-run")
-
     return {
         name = job_name,
         deps = deps,
@@ -286,6 +247,7 @@ end
 
 -- build headerunit file for batchjobs
 function make_headerunit_buildjobs(target, job_name, batchjobs, headerunit, opt)
+
     return {
         name = job_name,
         sourcefile = headerunit.sourcefile,
@@ -317,6 +279,7 @@ function make_headerunit_buildcmds(target, batchcmds, headerunit, opt)
 end
 
 function get_requires(target, module)
+
     local _requires
     local flags = _get_requiresflags(target, module)
     for _, flag in ipairs(flags) do

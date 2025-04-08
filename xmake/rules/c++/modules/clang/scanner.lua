@@ -28,6 +28,7 @@ import("support")
 import(".scanner", {inherit = true})
 
 function generate_dependency_for(target, sourcefile, opt)
+
     local compinst = target:compiler("cxx")
     local changed = false
     local dependfile = target:dependfile(sourcefile)

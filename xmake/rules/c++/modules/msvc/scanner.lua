@@ -30,6 +30,7 @@ import(".scanner", {inherit = true})
 
 -- generate dependency files
 function generate_dependency_for(target, sourcefile, opt)
+
     local msvc = target:toolchain("msvc")
     local compinst = target:compiler("cxx")
     local changed = false

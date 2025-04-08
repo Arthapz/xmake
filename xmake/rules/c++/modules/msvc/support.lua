@@ -55,6 +55,7 @@ end
 
 -- flags that doesn't affect bmi generation
 function strippeable_flags()
+
     -- speculative list as there is no resource that list flags that prevent reusability, this list will likely be improve over time
     -- @see https://learn.microsoft.com/en-us/cpp/build/reference/compiler-options-listed-alphabetically?view=msvc-170
     local strippeable_flags = {
@@ -87,19 +88,18 @@ function strippeable_flags()
         "analyze",
         "?",
     }
-
     local splitted_strippeable_flags = {
         "Fo",
         "I",
         "reference",
         "headerUnit",
     }
-
     return strippeable_flags, splitted_strippeable_flags
 end
 
 -- provide toolchain include dir for stl headerunit when p1689 is not supported
 function toolchain_includedirs(target)
+
     for _, toolchain_inst in ipairs(target:toolchains()) do
         if toolchain_inst:name() == "msvc" then
             local vcvars = toolchain_inst:config("vcvars")
@@ -114,6 +114,7 @@ end
 
 -- build c++23 standard modules if needed
 function get_stdmodules(target)
+
     if target:policy("build.c++.modules.std") then
         if target:data("c++.msvc.enable_std_import") then
             local msvc = target:toolchain("msvc")
@@ -138,6 +139,7 @@ function get_bmi_extension()
 end
 
 function get_ifcoutputflag(target)
+
     local ifcoutputflag = _g.ifcoutputflag
     if ifcoutputflag == nil then
         local compinst = target:compiler("cxx")
@@ -151,6 +153,7 @@ function get_ifcoutputflag(target)
 end
 
 function get_ifconlyflag(target)
+
     local ifconlyflag = _g.ifconlyflag
     if ifconlyflag == nil then
         local compinst = target:compiler("cxx")
@@ -162,20 +165,8 @@ function get_ifconlyflag(target)
     return ifconlyflag or nil
 end
 
-function get_ifcsearchdirflag(target)
-    local ifcsearchdirflag = _g.ifcsearchdirflag
-    if ifcsearchdirflag == nil then
-        local compinst = target:compiler("cxx")
-        if compinst:has_flags({"-ifcSearchDir", os.tmpdir()}, "cxxflags", {flagskey = "cl_ifc_search_dir"})  then
-            ifcsearchdirflag = "-ifcSearchDir"
-        end
-        assert(ifcsearchdirflag, "compiler(msvc): does not support c++ module flag(/ifcSearchDir)!")
-        _g.ifcsearchdirflag = ifcsearchdirflag or false
-    end
-    return ifcsearchdirflag or nil
-end
-
 function get_interfaceflag(target)
+
     local interfaceflag = _g.interfaceflag
     if interfaceflag == nil then
         local compinst = target:compiler("cxx")
@@ -189,6 +180,7 @@ function get_interfaceflag(target)
 end
 
 function get_referenceflag(target)
+
     local referenceflag = _g.referenceflag
     if referenceflag == nil then
         local compinst = target:compiler("cxx")
@@ -202,6 +194,7 @@ function get_referenceflag(target)
 end
 
 function get_headernameflag(target)
+
     local headernameflag = _g.headernameflag
     if headernameflag == nil then
         local compinst = target:compiler("cxx")
@@ -215,6 +208,7 @@ function get_headernameflag(target)
 end
 
 function get_headerunitflag(target)
+
     local headerunitflag = _g.headerunitflag
     if headerunitflag == nil then
         local compinst = target:compiler("cxx")
@@ -229,6 +223,7 @@ function get_headerunitflag(target)
 end
 
 function get_exportheaderflag(target)
+
     local exportheaderflag = _g.exportheaderflag
     if exportheaderflag == nil then
         if get_headernameflag(target) then
@@ -240,6 +235,7 @@ function get_exportheaderflag(target)
 end
 
 function get_scandependenciesflag(target)
+
     local scandependenciesflag = _g.scandependenciesflag
     if scandependenciesflag == nil then
         local compinst = target:compiler("cxx")
@@ -262,6 +258,7 @@ function get_scandependenciesflag(target)
 end
 
 function get_cppversionflag(target)
+
     local cppversionflag = _g.cppversionflag
     if cppversionflag == nil then
         local compinst = target:compiler("cxx")
@@ -272,6 +269,7 @@ function get_cppversionflag(target)
 end
 
 function get_internalpartitionflag(target)
+
     local internalpartitionflag = _g.internalpartitionflag
     if internalpartitionflag == nil then
         local compinst = target:compiler("cxx")

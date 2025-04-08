@@ -20,16 +20,17 @@ import("core.project.project")
 import("core.base.semver")
 
 function is_xmake_3_0()
+
     local compatibility_version = project.policy("compatibility.version")
     local xmake_3_0 = false
     if compatibility_version then
         xmake_3_0 = semver.compare(compatibility_version, "3.0") >= 0
     end
-
     return xmake_3_0
 end
 
 function main(target)
+
     import("support")
 
     -- we disable to build across targets in parallel, because the source files may depend on other target modules

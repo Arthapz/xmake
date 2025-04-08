@@ -64,7 +64,6 @@ function load(target)
     if not cxxlang then
         target:add("languages", "c++20")
     end
-
     -- load module support for the specific compiler
     _support(target).load(target)
 end
@@ -76,8 +75,9 @@ end
 
 -- strip flags not relevent for module reuse
 function strip_flags(target, flags, opt)
+
     local strippeable_flags, splitted_strippeable_flags =  _support(target).strippeable_flags()
-    
+
     if opt and opt.strip_defines then
         table.join2(splitted_strippeable_flags, {"D", "U"})
     end
@@ -88,7 +88,7 @@ function strip_flags(target, flags, opt)
         splitted_strippeable_flags_set:insert("/" .. flag)
         splitted_strippeable_flags_set:insert("-" .. flag)
     end
-    
+
     local output = {}
     local strip_next_flag = false
     for _, flag in ipairs(flags) do
@@ -119,6 +119,7 @@ end
 
 -- extract defines from flags
 function get_defines(flags)
+
     local define_flags = {"D", "U"}
     local defines = {}
     local extract_next_flag = false
@@ -149,6 +150,7 @@ function get_defines(flags)
 end
 
 function get_headerunit_key(target, headerfile, opt)
+
     local flags = opt and opt.flags
     if not flags then
         local compinst = target:compiler("cxx")
@@ -159,6 +161,7 @@ end
 
 -- patch sourcebatch
 function patch_sourcebatch(target, sourcebatch)
+
     sourcebatch.sourcekind = "cxx"
     sourcebatch.objectfiles = {}
     sourcebatch.dependfiles = {}
@@ -185,6 +188,7 @@ end
 
 -- has module extension? e.g. *.mpp, ...
 function has_module_extension(sourcefile)
+
     local modulexts = _g.modulexts
     if modulexts == nil then
         modulexts = hashset.of(".mpp", ".mxx", ".cppm", ".ixx")
@@ -196,6 +200,7 @@ end
 
 -- this target contains module files?
 function contains_modules(target)
+
     -- we can not use `"c++.build.builder"`, because it contains sourcekind/cxx.
     local target_with_modules = target:sourcebatches()["c++.build.modules"] and true or false
     if not target_with_modules then
@@ -215,6 +220,7 @@ end
 
 -- load module infos
 function load_moduleinfos(target, sourcebatch)
+
     local moduleinfos
     for _, sourcefile in ipairs(sourcebatch.sourcefiles) do
         local dependfile = target:dependfile(sourcefile)
@@ -233,13 +239,14 @@ function load_moduleinfos(target, sourcebatch)
     return moduleinfos
 end
 
-function find_quote_header_file(target, sourcefile, file)
+function find_quote_header_file(sourcefile, file)
     local p = path.join(path.directory(path.absolute(sourcefile, project.directory())), file)
     assert(os.isfile(p))
     return p
 end
 
 function find_angle_header_file(target, file)
+
     local headerpaths = _support(target).toolchain_includedirs(target)
     for _, dep in ipairs(target:orderdeps()) do
         local includedirs = table.join(dep:get("sysincludedirs") or {}, dep:get("includedirs") or {})
@@ -272,6 +279,7 @@ end
 
 -- get modules cache directory
 function modules_cachedir(target, opt)
+
     assert(opt and (opt.named ~= nil or opt.headerunit or opt.scan))
     local type
     if opt.headerunit then
@@ -302,6 +310,7 @@ function get_metafile(target, module)
 end
 
 function get_outputdir(target, modulefile, opt)
+
     local cachedir = modules_cachedir(target, opt)
     local modulehash = opt.key or get_modulehash(target, modulefile, opt)
     local outputdir = path.join(cachedir, modulehash)
@@ -311,30 +320,8 @@ function get_outputdir(target, modulefile, opt)
     return outputdir
 end
 
--- get name provide info and cpp sourcefile of a module
-function get_provided_module(module)
-
-    local name, provide, cppfile
-    if module.provides then
-        -- assume there that provides is only one, until we encounter the cases
-        -- "Some compiler may choose to implement the :private module partition as a separate module for lookup purposes, and if so, it should be indicated as a separate provides entry."
-        local length = 0
-        for k, v in pairs(module.provides) do
-            length = length + 1
-            name = k
-            provide = v
-            cppfile = provide.sourcefile
-            if length > 1 then
-                raise("multiple provides are not supported now!")
-            end
-            break
-        end
-    end
-
-    return name, provide, cppfile
-end
-
 function add_installfiles_for_modules(target, modules)
+
     local sourcebatch = target:sourcebatches()["c++.build.modules.install"]
     if sourcebatch and sourcebatch.sourcefiles then
         for _, sourcefile in ipairs(sourcebatch.sourcefiles) do
@@ -352,3 +339,4 @@ function add_installfiles_for_modules(target, modules)
         end
     end
 end
+

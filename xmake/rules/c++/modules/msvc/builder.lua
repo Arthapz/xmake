@@ -33,6 +33,7 @@ import(".builder", {inherit = true})
 
 -- get flags for building a module
 function _make_modulebuildflags(target, provide, bmifile, opt)
+
     local ifcoutputflag = support.get_ifcoutputflag(target)
     local ifconlyflag = support.get_ifconlyflag(target)
     local interfaceflag = support.get_interfaceflag(target)
@@ -47,7 +48,9 @@ function _make_modulebuildflags(target, provide, bmifile, opt)
     end
     return flags
 end
+
 function _compile_one_step(target, bmifile, sourcefile, objectfile, opt)
+
     local ifcoutputflag = support.get_ifcoutputflag(target)
     local interfaceflag = support.get_interfaceflag(target)
     local internalpartitionflag = support.get_internalpartitionflag(target)
@@ -64,6 +67,7 @@ function _compile_one_step(target, bmifile, sourcefile, objectfile, opt)
 end
 
 function _compile_bmi_step(target, bmifile, sourcefile, opt)
+
     local ifcoutputflag = support.get_ifcoutputflag(target)
     local interfaceflag = support.get_interfaceflag(target)
     local ifconlyflag = support.get_ifconlyflag(target)
@@ -198,6 +202,7 @@ function _get_requiresflags(target, module)
 end
 
 function _append_requires_flags(target, module)
+
     local cxxflags = {}
     local requiresflags = _get_requiresflags(target, module)
     for _, flag in ipairs(requiresflags) do
@@ -211,36 +216,10 @@ function _append_requires_flags(target, module)
     target:fileconfig_add(module.sourcefile, {force = {cxxflags = cxxflags}})
 end
 
--- populate module map
-function populate_module_map(target, modules)
-    for _, module in pairs(modules) do
-        local name, provide, cppfile = support.get_provided_module(module)
-        if provide then
-            local bmifile = support.get_bmi_path(provide.bmi)
-            add_module_to_target_mapper(target, name, cppfile, bmifile, {deps = module.requires})
-        end
-    end
-end
-
--- get defines for a module
-function get_module_required_defines(target, sourcefile)
-    local compinst = compiler.load("cxx", {target = target})
-    local compflags = compinst:compflags({sourcefile = sourcefile, target = target})
-    local defines
-    for _, flag in ipairs(compflags) do
-        if flag:startswith("-D") or flag:startswith("/D") then
-            defines = defines or {}
-            table.insert(defines, flag:sub(3))
-        end
-    end
-    return defines
-end
-
 -- build module file for batchjobs
 function make_module_buildjobs(target, batchjobs, job_name, module, deps, opt)
 
     local dryrun = option.get("dry-run")
-
     return {
         name = job_name,
         deps = deps,
@@ -315,6 +294,7 @@ end
 
 -- build headerunit file for batchjobs
 function make_headerunit_buildjobs(target, job_name, batchjobs, headerunit)
+
     return {
         name = job_name,
         sourcefile = headerunit.sourcefile,
