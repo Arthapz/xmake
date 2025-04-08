@@ -269,7 +269,7 @@ function make_headerunit_buildjobs(target, job_name, batchjobs, headerunit, opt)
 
     return {
         name = job_name,
-        sourcefile = headerunit.path,
+        sourcefile = headerunit.sourcefile,
         job = batchjobs:newjob(job_name, function(_, _, jobopt)
             local build = should_build(target, headerunit)
             if build then

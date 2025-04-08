@@ -81,7 +81,7 @@ function _compile_bmi_step(target, bmifile, sourcefile, opt)
 end
 
 -- get flags for building a headerunit
-function _make_headerunitflags(target, headerunit)
+function _make_headerunitflags(target, headerunit, headertype)
 
     -- get flags
     local exportheaderflag = support.get_exportheaderflag(target)
@@ -90,32 +90,29 @@ function _make_headerunitflags(target, headerunit)
     local ifconlyflag = support.get_ifconlyflag(target)
     assert(headernameflag and exportheaderflag, "compiler(msvc): does not support c++ header units!")
 
-    local headertype = (headerunit.method == "include-angle") and ":angle" or ":quote"
-    -- local local_directory = (headertype == ":quote") and {"-I" .. path.directory(headerunit.sourcefile)} or {}
-    local flags = table.join({}, {"-TP",
-                                               exportheaderflag,
-                                               ifcoutputflag,
-                                               headerunit.bmifile},
-                                               ifconlyflag or {},
-                                               headernameflag .. headertype,
-                                               headertype == ":angle" and headerunit.name or headerunit.sourcefile)
+    local flags = {"-TP",
+                   exportheaderflag,
+                   ifcoutputflag,
+                   headerunit.bmifile,
+                   ifconlyflag or {},
+                   headernameflag .. headertype} -- keep it at last flag
     return flags
 end
 
 -- do compile
-function _compile(target, flags, sourcefile, outputfile, headerunit)
+function _compile(target, flags, sourcefile, outputfile)
 
     local dryrun = option.get("dry-run")
     local compinst = target:compiler("cxx")
-    local compflags = compinst:compflags({sourcefile = sourcefile, target = target})
-    local flags = table.join(compflags or {}, flags)
+    local compflags = compinst:compflags({sourcefile = sourcefile, target = target, sourcekind = "cxx"})
+    flags = table.join(compflags or {}, flags or {})
 
     -- trace
     if option.get("verbose") then
-        if headerunit then
-            print(os.args(compinst:program(), flags))
+        if not outputfile then
+            print(os.args(table.join(compinst:program(), flags, sourcefile)))
         else
-            print(compinst:compcmd(sourcefile, outputfile, {target = target, compflags = flags, rawargs = true}))
+            print(compinst:compcmd(sourcefile, outputfile, {target = target, compflags = flags, sourcekind = "cxx", rawargs = true}))
         end
     end
 
@@ -125,7 +122,7 @@ function _compile(target, flags, sourcefile, outputfile, headerunit)
             local msvc = target:toolchain("msvc")
             os.vrunv(compinst:program(), flags, {envs = msvc:runenvs()})
         else
-            assert(compinst:compile(sourcefile, outputfile, {target = target, compflags = flags}))
+            assert(compinst:compile(sourcefile, outputfile or target:objectfile(sourcefile), {target = target, compflags = flags}))
         end
     end
 end
@@ -136,7 +133,7 @@ function _batchcmds_compile(batchcmds, target, flags, sourcefile, outputfile)
     opt = opt or {}
     local compinst = target:compiler("cxx")
     local compflags = compinst:compflags({sourcefile = sourcefile, target = target, sourcekind = "cxx"})
-    flags = table.join("/c", compflags or {}, flags or {}, outputfile and "-Fo" .. outputfile or {}, sourcefile or {})
+    flags = table.join("/c", compflags or {}, outputfile and "-Fo" .. outputfile or {}, flags or {}, sourcefile or {})
     batchcmds:compilev(flags, {compiler = compinst, sourcekind = "cxx"})
 end
 
@@ -182,27 +179,6 @@ function _get_requiresflags(target, module)
                 local deps = _get_requiresflags(target, dep_module)
                 table.join2(deps_flags, deps)
             end
--- t            local mapflag
---             local bmifile = dep_module.bmi
---             -- aliased headerunit
---             if dep_module.aliasof then
---                 local aliased = get_from_target_mapper(target, dep_module.aliasof)
---                 bmifile = aliased.bmi
---                 mapflag = {headerunitflag .. aliased.headerunit.type, required .. "=" .. bmifile}
---             -- headerunit
---             elseif dep_module.headerunit then
---                 mapflag = {headerunitflag .. dep_module.headerunit.type, required .. "=" .. bmifile}
---             -- named module
---             else
---                 mapflag = {referenceflag, required .. "=" .. bmifile}
---             end
---             table.insert(deps_flags, mapflag)
-
---             -- append deps
---             if dep_module.opt and dep_module.opt.deps then
---                 local deps = _get_requiresflags(target, { name = dep_module.name or dep_module.sourcefile, bmi = bmifile, requires = dep_module.opt.deps })
---                 table.join2(deps_flags, deps)
---             end
         end
 
         -- remove duplicates
@@ -261,72 +237,45 @@ function get_module_required_defines(target, sourcefile)
 end
 
 -- build module file for batchjobs
-function make_module_buildjobs(target, batchjobs, job_name, deps, opt)
+function make_module_buildjobs(target, batchjobs, job_name, module, deps, opt)
 
-    local name, provide, _ = support.get_provided_module(opt.module)
-    local bmifile = provide and support.get_bmi_path(provide.bmi)
     local dryrun = option.get("dry-run")
 
     return {
         name = job_name,
-        deps = table.join(target:name() .. "_populate_module_map", deps),
-        sourcefile = opt.cppfile,
-        job = batchjobs:newjob(name or opt.cppfile, function(index, total, jobopt)
-
-            local mapped_bmi
-            if provide and support.memcache():get2(target:name() .. name, "reuse") then
-                mapped_bmi = get_from_target_mapper(target, name).bmi
-            end
-
-            local build, dependinfo
-            local dependfile = target:dependfile(bmifile or opt.objectfile)
-            if provide or support.has_module_extension(opt.cppfile) then
-                build, dependinfo = should_build(target, opt.cppfile, bmifile, {name = name, objectfile = opt.objectfile, requires = opt.module.requires})
-
-                -- needed to detect rebuild of dependencies
-                if provide and build then
-                    mark_build(target, name)
-                end
-            end
-
+        deps = deps,
+        sourcefile = module.sourcefile,
+        job = batchjobs:newjob(job_name, function(_, _, jobopt)
             -- append requires flags
-            if opt.module.requires then
-                _append_requires_flags(target, opt.module, name, opt.cppfile, bmifile, opt)
+            if module.deps then
+                _append_requires_flags(target, module)
             end
 
-            -- for cpp file we need to check after appendings the flags
-            if build == nil then
-                build, dependinfo = should_build(target, opt.cppfile, bmifile, {name = name, objectfile = opt.objectfile, requires = opt.module.requires})
-            end
+            -- generate and append module mapper file
+            local build = should_build(target, module)
 
-            if build then
-                -- compile if it's a named module
-                if provide or support.has_module_extension(opt.cppfile) then
+            local fileconfig = target:fileconfig(module.sourcefile)
+            local external = fileconfig and fileconfig.external
+            local reused = external and external.reused
+            if build and not reused then
+                if support.has_module_extension(module.sourcefile) then
                     if not dryrun then
-                        local objectdir = path.directory(opt.objectfile)
+                        local objectdir = path.directory(module.objectfile)
                         if not os.isdir(objectdir) then
                             os.mkdir(objectdir)
                         end
                     end
-
-                    local fileconfig = target:fileconfig(opt.cppfile)
-                    local public = fileconfig and fileconfig.public
-                    local external = fileconfig and fileconfig.external
-                    local from_moduleonly = external and external.moduleonly
-                    local bmifile = mapped_bmi or bmifile
-                    if external and not from_moduleonly then
-                        if not mapped_bmi then
-                            progress.show(jobopt.progress, "${color.build.target}<%s> ${clear}${color.build.object}compiling.bmi.$(mode) %s", target:name(), name or opt.cppfile)
-                            _compile_bmi_step(target, bmifile, opt.cppfile, opt.objectfile, provide)
-                        end
+                    local name = module.name
+                    if external and not external.moduleonly then
+                        progress.show(jobopt.progress, "${color.build.target}<%s> ${clear}${color.build.object}compiling.module.bmi.$(mode) %s", target:name(), name or module.sourcefile)
+                        _compile_bmi_step(target, module.bmifile, module.sourcefile, {objectfile = module.objectfile, module = module})
                     else
-                        progress.show(jobopt.progress, "${color.build.target}<%s> ${clear}${color.build.object}compiling.module.$(mode) %s", target:name(), name or opt.cppfile)
-                        _compile_one_step(target, bmifile, opt.cppfile, opt.objectfile, provide)
+                        progress.show(opt.progress, "${color.build.target}<%s> ${clear}${color.build.object}compiling.module.$(mode) %s", target:name(), name or module.sourcefile)
+                        _compile_one_step(target, module.bmifile, module.sourcefile, module.objectfile, {module = module})
                     end
                 else
-                    os.tryrm(opt.objectfile) -- force rebuild for .cpp files
+                    os.tryrm(module.objectfile) -- force rebuild for .cpp files
                 end
-                depend.save(dependinfo, dependfile)
             end
         end)}
 end
@@ -365,37 +314,19 @@ function make_module_buildcmds(target, batchcmds, module, opt)
 end
 
 -- build headerunit file for batchjobs
-function make_headerunit_buildjobs(target, job_name, batchjobs, headerunit, bmifile, outputdir, opt)
-    local already_exists = add_headerunit_to_target_mapper(target, headerunit, bmifile)
-    if not already_exists then
-        return {
-            name = job_name,
-            sourcefile = headerunit.path,
-            job = batchjobs:newjob(job_name, function(index, total, jobopt)
-                if not os.isdir(outputdir) then
-                    os.mkdir(outputdir)
-                end
-
-                local compinst = compiler.load("cxx", {target = target})
-                local compflags = compinst:compflags({sourcefile = headerunit.path, target = target})
-
-                local dependfile = target:dependfile(bmifile)
-                local dependinfo = depend.load(dependfile) or {}
-                dependinfo.files = {}
-                local depvalues = {compinst:program(), compflags}
-
-                local name = headerunit.unique and headerunit.name or headerunit.path
-
-                if opt.build then
-                    progress.show(jobopt.progress, "${color.build.target}<%s> ${clear}${color.build.object}compiling.headerunit.$(mode) %s", target:name(), headerunit.name)
-                    _compile(target, _make_headerunitflags(target, headerunit), name, target:objectfile(headerunit.path), true)
-                end
-
-                table.insert(dependinfo.files, headerunit.path)
-                dependinfo.values = depvalues
-                depend.save(dependinfo, dependfile)
-            end)}
-    end
+function make_headerunit_buildjobs(target, job_name, batchjobs, headerunit)
+    return {
+        name = job_name,
+        sourcefile = headerunit.sourcefile,
+        job = batchjobs:newjob(job_name, function(_, _, jobopt)
+            local build = should_build(target, headerunit)
+            if build then
+                local name = headerunit.unique and path.filename(headerunit.name) or headerunit.name
+                local headertype = (headerunit.method == "include-angle") and ":angle" or ":quote"
+                progress.show(jobopt.progress, "${color.build.target}<%s> ${clear}${color.build.object}compiling.headerunit.$(mode) %s", target:name(), name)
+                _compile(target, _make_headerunitflags(target, headerunit, headertype), (headertype == ":angle") and headerunit.name or headerunit.sourcefile)
+            end
+        end)}
 end
 
 -- build headerunit file for batchcmds
@@ -408,8 +339,9 @@ function make_headerunit_buildcmds(target, batchcmds, headerunit, opt)
     local build = should_build(target, headerunit)
     if build then
         local name = headerunit.unique and path.filename(headerunit.name) or headerunit.name
+        local headertype = (headerunit.method == "include-angle") and ":angle" or ":quote"
         batchcmds:show_progress(opt.progress, "${color.build.target}<%s> ${clear}${color.build.object}compiling.headerunit.$(mode) %s", target:name(), name)
-        _batchcmds_compile(batchcmds, target, table.join(_make_headerunitflags(target, headerunit)))
+        _batchcmds_compile(batchcmds, target, _make_headerunitflags(target, headerunit, headertype), (headertype == ":angle") and headerunit.name or headerunit.sourcefile)
         batchcmds:add_depfiles(headerunit.sourcefile)
     end
     batchcmds:add_depvalues(depvalues)
