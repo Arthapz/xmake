@@ -112,12 +112,32 @@ function strip_flags(target, flags, opt)
     return output
 end
 
--- strip flags not relevent for module reuse
+-- extract defines from flags
 function get_defines(flags)
+    local define_flags = {"D", "U"}
     local defines = {}
+    local extract_next_flag = false
     for _, flag in ipairs(flags) do
-        if flag:startswith("/D") or flag:startswith("-D") or flag:startswith("-U") or flag:startswith("/U") then
-            table.insert(defines, flag:sub(3))
+        local extract = false
+
+        if extract_next_flag then
+            extract = true
+            extract_next_flag = false
+        else
+            for _, _flag in ipairs(define_flags) do
+                if (flag == "/" .. _flag) or (flag == "-" .. _flag) then
+                    extract_next_flag = true
+                    break
+                elseif flag:startswith("/" .. _flag) or flag:startswith("-" .. _flag) then
+                    extract = true
+                    flag = flag:sub(3)
+                    break
+                end
+            end
+        end
+
+        if extract then
+            table.insert(defines, flag)
         end
     end
     return defines
