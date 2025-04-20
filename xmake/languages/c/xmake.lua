@@ -32,7 +32,8 @@ language("c")
 
     set_nameflags {
         object = {
-            "config.includedirs"
+            "target.runtimes"
+        ,   "config.includedirs"
         ,   "config.frameworkdirs"
         ,   "config.frameworks"
         ,   "target.runtimes"
