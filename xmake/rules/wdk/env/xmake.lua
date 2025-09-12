@@ -33,7 +33,7 @@ rule("wdk.env")
         if not target:data("wdk") then
 
             -- find wdk
-            local wdk = assert(find_wdk(target:values("wdk.sdkdir"), {verbose = true}), "WDK not found!")
+            local wdk = assert(find_wdk(nil, {verbose = true}), "WDK not found!")
 
             -- update the umdf sdk version from the xmake.lua
             local umdfver = target:values("wdk.umdf.sdkver")
