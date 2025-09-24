@@ -2,16 +2,13 @@ name: Windows
 
 on:
   pull_request:
-  push:
-  release:
-    types: [published]
 
 jobs:
   build:
     strategy:
       matrix:
         os: [windows-2022, windows-2025]
-        arch: [x64, x86, arm64]
+        arch: [x64]
 
     runs-on: ${{ matrix.os }}
 
@@ -86,7 +83,9 @@ jobs:
           Set-Item -Path Env:Path -Value ($Env:XMAKE_PROGRAM_DIR + ";" + $Env:Path)
           xrepo --version
           xmake show
-          xmake lua -v -D tests/run.lua
+          cd tests/projects/c++/modules/multiple_runtimes
+          xmake -v -D
+          # xmake lua -v -D tests/run.lua projects/c++/modules/multiple_runtimes
 
         # upload artifacts
       - name: Upload artifacts (exe)

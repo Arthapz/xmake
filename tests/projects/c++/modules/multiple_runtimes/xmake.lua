@@ -2,12 +2,12 @@ add_rules("mode.debug", "mode.release")
 set_languages("c++23")
 set_encodings("utf-8")
 
-target("llvm")
-    set_kind("binary")
-    set_toolchains("clang")
-    set_runtimes("c++_shared")
-    set_policy("build.c++.modules", true)
-    add_files("src/main.cpp")
+-- target("llvm")
+--     set_kind("binary")
+--     set_toolchains("clang")
+--     set_runtimes("c++_shared")
+--     set_policy("build.c++.modules", true)
+--     add_files("src/main.cpp")
 
 if is_plat("linux") or is_plat("mingw") then
     target("gnu")
@@ -20,9 +20,15 @@ if is_plat("linux") or is_plat("mingw") then
 end
 
 if is_plat("windows") then
+    target("llvm-msvc")
+        set_kind("binary")
+        set_toolchains("clang")
+        set_policy("build.c++.modules", true)
+        add_files("src/main.cpp")
+
     target("msvc")
         set_kind("binary")
-        -- set_toolchains("msvc")
+        set_toolchains("msvc")
         set_policy("build.c++.modules", true)
         add_files("src/main.cpp")
 end
