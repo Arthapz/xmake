@@ -73,7 +73,6 @@ rule("swift.interop", function()
         import("utils.progress")
         import("core.base.option")
         import("core.tool.compiler")
-        import("core.language.language")
         import("core.project.depend")
 
         local function _get_target_cpp_langflags()
@@ -96,7 +95,8 @@ rule("swift.interop", function()
         end
 
         local mode = target:data("swift.interop")
-        local sc = target:tool("sc")
+        -- local sc = target:compiler("sc")
+        local sc = import("core.tool.compiler").load("sc")
         assert(sc, "No swift compiler found!")
         local outdir = target:data("swift.interop.outdir")
         if not os.isdir(outdir) then os.mkdir(outdir) end
@@ -139,8 +139,7 @@ rule("swift.interop", function()
                         )
                     end
 
-                    local compinst = import("core.tool.compiler").load("sc")
-                    local _scflags = compinst:compflags({target = target, sourcekind = "sc"})
+                    local _scflags = sc:compflags({target = target, sourcekind = "sc"})
                     local scflags
                     if target:has_tool("sc", "swift_frontend") then
                         for _, scflag in ipairs(_scflags) do
@@ -165,11 +164,11 @@ rule("swift.interop", function()
                         stdflag or {},
                         public_sourcefiles)
                     if option.get("verbose") then
-                        print(os.args(table.join(sc, flags)))
+                        print(os.args(table.join(sc:program(), flags)))
                     end
 
                     os.tryrm(header)
-                    local outdata, errdata = os.iorunv(sc, flags)
+                    local outdata, errdata = os.iorunv(sc:program(), flags)
                     assert(outdata, errdata)
                 end, {
                     files = public_sourcefiles,
