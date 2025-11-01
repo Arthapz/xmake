@@ -88,37 +88,37 @@ toolchain("llvm")
             toolchain:add("ldflags", "-fuse-ld=lld")
             toolchain:add("shflags", "-fuse-ld=lld")
         elseif toolchain:is_plat("macosx", "iphoneos", "tvos", "watchos", "xros") then
-            if not toolchain:config("xcode_sysroot") and not get_config("xcode_sysroot") then
-                local xcode_dir     = toolchain:config("xcode") or get_config("xcode")
-                local xcode_sdkver  = toolchain:config("xcode_sdkver") or get_config("xcode_sdkver")
-                local sdkdir
-                if toolchain:is_plat("macosx") then
-                    -- @see https://github.com/xmake-io/xmake/issues/1179
-                    local sdkroot = xcode_dir and path.join(xcode_dir, "Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs")
-                                              or "/Library/Developer/CommandLineTools/SDKs"
-                    sdkdir = xcode_sdkver and path.join(sdkroot, "MacOSX" .. xcode_sdkver .. ".sdk")
-                    if not sdkdir or not os.isdir(sdkdir) then
-                        sdkdir = path.join(sdkroot, "MacOSX.sdk")
-                        sdkdir = os.isdir(sdkdir) and sdkdir or nil
-                    end
-                else
-                    local mapper = {
-                        iphoneos = { arm64 = "iPhoneOS", ["x86_64"] = "iPhoneSimulator" },
-                        tvos = { arm64 = "AppleTVOS", ["x86_64"] = "AppleTVSimulator" },
-                        watchos = { arm64 = "WatchOS", ["x86_64"] = "WatchSimulator" },
-                        xros = { arm64 = "XROS", ["x86_64"] = "XRSimulator" }
-                    }
-                    local plat = mapper[toolchain:plat()][toolchain:arch()]
-                    local sdkroot = xcode_dir and path.join(xcode_dir, "Contents/Developer/Platforms/" .. plat ..".platform/Developer/SDKs")
-                    if xcode_sdkver and os.isdir(path.join(sdkroot, plat .. xcode_sdkver .. ".sdk")) then
-                        sdkdir = path.join(sdkroot, plat .. xcode_sdkver .. ".sdk")
-                    elseif os.isdir(path.join(sdkroot, plat .. ".sdk")) then
-                        sdkdir = path.join(sdkroot, plat .. ".sdk")
-                    end
-                    assert(sdkdir and os.isdir(sdkdir), "No xcode sysroot found!")
-                end
-                toolchain:config_set("xcode_sysroot", sdkdir)
-            end
+            -- if not toolchain:config("xcode_sysroot") and not get_config("xcode_sysroot") then
+            --     local xcode_dir     = toolchain:config("xcode") or get_config("xcode")
+            --     local xcode_sdkver  = toolchain:config("xcode_sdkver") or get_config("xcode_sdkver")
+            --     local sdkdir
+            --     if toolchain:is_plat("macosx") then
+            --         -- @see https://github.com/xmake-io/xmake/issues/1179
+            --         local sdkroot = xcode_dir and path.join(xcode_dir, "Contents/Developer/Platforms/MacOSX.platform/Developer/SDKs")
+            --                                   or "/Library/Developer/CommandLineTools/SDKs"
+            --         sdkdir = xcode_sdkver and path.join(sdkroot, "MacOSX" .. xcode_sdkver .. ".sdk")
+            --         if not sdkdir or not os.isdir(sdkdir) then
+            --             sdkdir = path.join(sdkroot, "MacOSX.sdk")
+            --             sdkdir = os.isdir(sdkdir) and sdkdir or nil
+            --         end
+            --     else
+            --         local mapper = {
+            --             iphoneos = { arm64 = "iPhoneOS", ["x86_64"] = "iPhoneSimulator" },
+            --             tvos = { arm64 = "AppleTVOS", ["x86_64"] = "AppleTVSimulator" },
+            --             watchos = { arm64 = "WatchOS", ["x86_64"] = "WatchSimulator" },
+            --             xros = { arm64 = "XROS", ["x86_64"] = "XRSimulator" }
+            --         }
+            --         local plat = mapper[toolchain:plat()][toolchain:arch()]
+            --         local sdkroot = xcode_dir and path.join(xcode_dir, "Contents/Developer/Platforms/" .. plat ..".platform/Developer/SDKs")
+            --         if xcode_sdkver and os.isdir(path.join(sdkroot, plat .. xcode_sdkver .. ".sdk")) then
+            --             sdkdir = path.join(sdkroot, plat .. xcode_sdkver .. ".sdk")
+            --         elseif os.isdir(path.join(sdkroot, plat .. ".sdk")) then
+            --             sdkdir = path.join(sdkroot, plat .. ".sdk")
+            --         end
+            --         assert(sdkdir and os.isdir(sdkdir), "No xcode sysroot found!")
+            --     end
+            --     toolchain:config_set("xcode_sysroot", sdkdir)
+            -- end
             -- load configurations
             import(".xcode.load_" .. toolchain:plat())(toolchain)
         elseif toolchain:is_plat("cross") then
