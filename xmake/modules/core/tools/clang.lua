@@ -265,19 +265,33 @@ function _get_llvm_dirs(self, target)
         local bindir, libdir, cxxlibdir, includedir, cxxincludedir, resdir, rtdir, rtlink
         if rootdir then
             bindir = path.join(rootdir, "bin")
-            bindir = os.isdir(bindir) and bindir or nil
+            if bindir then
+                bindir = os.isdir(bindir) and bindir or nil
+            end
 
             libdir = path.join(rootdir, "lib")
-            libdir = os.isdir(libdir) and libdir or nil
+            if libdir then
+                libdir = os.isdir(libdir) and libdir or nil
+            end
 
-            cxxlibdir = libdir and path.join(libdir, "c++")
-            cxxlibdir = os.isdir(cxxlibdir) and cxxlibdir or nil
+            if libdir then
+                cxxlibdir = libdir and path.join(libdir, "c++")
+                if cxxlibdir then
+                    cxxlibdir = os.isdir(cxxlibdir) and cxxlibdir or nil
+                end
+            end
 
             includedir = path.join(rootdir, "include")
-            includedir = os.isdir(includedir) and includedir or nil
+            if includedir then
+                includedir = os.isdir(includedir) and includedir or nil
+            end
 
-            cxxincludedir = includedir and path.join(includedir, "c++", "v1") or nil
-            cxxincludedir = os.isdir(cxxincludedir) and cxxincludedir or nil
+            if includedir then
+                cxxincludedir = includedir and path.join(includedir, "c++", "v1") or nil
+                if cxxincludedir then
+                    cxxincludedir = os.isdir(cxxincludedir) and cxxincludedir or nil
+                end
+            end
 
             resdir = _get_llvm_resourcedir(self)
             if self:is_plat("windows") then
@@ -348,6 +362,16 @@ function nf_runtime(self, runtime, opt)
     -- and need manual setting of libc++ headerdirectory 
     -- @see https://github.com/llvm/llvm-project/issues/79647
     local llvm_dirs = _get_llvm_dirs(self, target)
+
+    if self:is_plat("windows") and runtime == "c++_shared" then
+        if llvm_dirs.bin then
+            self:add("runenvs", "PATHS", llvm_dirs.bin)
+        end
+        if llvm_dirs.rt then
+            self:add("runenvs", "PATHS", llvm_dirs.rt)
+        end
+    end
+
     -- we will set runtimes in android ndk toolchain
     if not self:is_plat("android") then
         maps = maps or {}
@@ -381,6 +405,7 @@ function nf_runtime(self, runtime, opt)
                     maps[name] = table.join("-resource-dir=" .. llvm_dirs.res, maps[name])
                 end
             end
+
             local is_cxx = target and (target.sourcekinds and table.contains(table.wrap(target:sourcekinds()), "cxx"))
             if is_cxx then
                 if llvm_dirs.lib then
@@ -396,7 +421,6 @@ function nf_runtime(self, runtime, opt)
                     if llvm_dirs.rt then
                         maps["c++_shared"] = table.join(maps["c++_shared"], nf_rpathdir(self, llvm_dirs.rt))
                     end
-
                     -- add rpath to avoid the user need to set LD_LIBRARY_PATH by hand
                     if target.is_shared and target:is_shared() and target.filename and self:is_plat("macosx", "iphoneos", "watchos") then
                         maps["c++_shared"] = table.join(maps["c++_shared"], "-install_name")
