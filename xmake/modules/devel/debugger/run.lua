@@ -310,6 +310,23 @@ function _run_raddbg(program, argv, opt)
     return true
 end
 
+-- run nnd
+function _run_nnd(program, argv, opt)
+    opt = opt or {}
+    local nnd = find_tool("nnd", {program = config.get("debugger")})
+    if not nnd then
+        return false
+    end
+
+    -- patch arguments
+    argv = argv or {}
+    table.insert(argv, 1, program)
+
+    -- run it
+    os.execv(nnd.program, argv, table.join(opt, {exclusive = true}))
+    return true
+end
+
 -- run program with debugger
 --
 -- @param program   the program name
@@ -337,6 +354,11 @@ function main(program, argv, opt)
     ,   {"gede"        , _run_gede}
     ,   {"seergdb"     , _run_seergdb}
     }
+
+    -- for windows target or on windows?
+    if (config.plat() or os.host()) == "linux" then
+        table.insert(debuggers, 1, {"nnd", _run_nnd})
+    end
 
     -- for windows target or on windows?
     if (config.plat() or os.host()) == "windows" then
