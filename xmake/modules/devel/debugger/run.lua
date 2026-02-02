@@ -29,7 +29,7 @@ import("private.action.run.runenvs")
 -- run gdb
 function _run_gdb(program, argv, opt)
     opt = opt or {}
-    local gdb = find_tool("gdb", {program = config.get("debugger")})
+    local gdb = find_tool("gdb", {program = opt.program})
     if not gdb then
         return false
     end
@@ -47,7 +47,7 @@ end
 -- run cuda-gdb
 function _run_cudagdb(program, argv, opt)
     opt = opt or {}
-    local gdb = find_tool("cudagdb", {program = config.get("debugger")})
+    local gdb = find_tool("cudagdb", {program = opt.program})
     if not gdb then
         return false
     end
@@ -65,7 +65,7 @@ end
 -- run lldb
 function _run_lldb(program, argv, opt)
     opt = opt or {}
-    local lldb = find_tool("lldb", {program = config.get("debugger")})
+    local lldb = find_tool("lldb", {program = opt.program})
     if not lldb then
         return false
     end
@@ -83,7 +83,7 @@ end
 
 -- run windbg
 function _run_windbg(program, argv, opt)
-    local windbg = find_tool("windbg", {program = config.get("debugger")})
+    local windbg = find_tool("windbg", {program = opt.program})
     if not windbg then
         return false
     end
@@ -100,7 +100,7 @@ end
 
 -- run cuda-memcheck
 function _run_cudamemcheck(program, argv, opt)
-    local cudamemcheck = find_tool("cudamemcheck", {program = config.get("debugger")})
+    local cudamemcheck = find_tool("cudamemcheck", {program = opt.program})
     if not cudamemcheck then
         return false
     end
@@ -116,7 +116,7 @@ end
 
 -- run x64dbg
 function _run_x64dbg(program, argv, opt)
-    local x64dbg = find_tool("x64dbg", {program = config.get("debugger")})
+    local x64dbg = find_tool("x64dbg", {program = opt.program})
     if not x64dbg then
         return false
     end
@@ -133,7 +133,7 @@ end
 
 -- run ollydbg
 function _run_ollydbg(program, argv, opt)
-    local ollydbg = find_tool("ollydbg", {program = config.get("debugger")})
+    local ollydbg = find_tool("ollydbg", {program = opt.program})
     if not ollydbg then
         return false
     end
@@ -150,7 +150,7 @@ end
 
 -- run vsjitdebugger
 function _run_vsjitdebugger(program, argv, opt)
-    local vsjitdebugger = find_tool("vsjitdebugger", {program = config.get("debugger")})
+    local vsjitdebugger = find_tool("vsjitdebugger", {program = opt.program})
     if not vsjitdebugger then
         return false
     end
@@ -167,7 +167,7 @@ end
 
 -- run devenv
 function _run_devenv(program, argv, opt)
-    local devenv = find_tool("devenv", {program = config.get("debugger")})
+    local devenv = find_tool("devenv", {program = opt.program})
     if not devenv then
         return false
     end
@@ -185,7 +185,7 @@ end
 
 -- run renderdoc
 function _run_renderdoc(program, argv, opt)
-    local renderdoc = find_tool("renderdoc", {program = config.get("debugger")})
+    local renderdoc = find_tool("renderdoc", {program = opt.program})
     if not renderdoc then
         return false
     end
@@ -258,7 +258,7 @@ function _run_gede(program, argv, opt)
     opt = opt or {}
 
     -- 'gede --version' return with non-zero code
-    local gede = find_tool("gede", {program = config.get("debugger"), norun = true})
+    local gede = find_tool("gede", {program = opt.program, norun = true})
     if not gede then
         return false
     end
@@ -277,7 +277,7 @@ end
 -- run seergdb
 function _run_seergdb(program, argv, opt)
     opt = opt or {}
-    local seergdb = find_tool("seergdb", {program = config.get("debugger")})
+    local seergdb = find_tool("seergdb", {program = opt.program})
     if not seergdb then
         return false
     end
@@ -295,7 +295,7 @@ end
 -- run rad debugger
 function _run_raddbg(program, argv, opt)
     opt = opt or {}
-    local raddbg = find_tool("raddbg", {program = config.get("debugger")})
+    local raddbg = find_tool("raddbg", {program = opt.program})
     if not raddbg then
         return false
     end
@@ -313,7 +313,7 @@ end
 -- run nnd
 function _run_nnd(program, argv, opt)
     opt = opt or {}
-    local nnd = find_tool("nnd", {program = config.get("debugger")})
+    local nnd = find_tool("nnd", {program = opt.program})
     if not nnd then
         return false
     end
@@ -372,8 +372,9 @@ function main(program, argv, opt)
 
     -- get debugger from configuration
     opt = opt or {}
-    local debugger = config.get("debugger")
+    local debugger = option.get("debugger") or config.get("debugger")
     if debugger then
+        opt.program = debugger
 
         -- try exactmatch first
         debugger = debugger:lower()

@@ -61,6 +61,7 @@ task("run")
                                                         end }
 
                 ,   {nil, "arguments",  "vs",  nil  , "The target arguments"                                               }
+                ,   {nil, "debugger",  "v",  nil  , "Override the default debugger"                                               }
                 }
             }
 
