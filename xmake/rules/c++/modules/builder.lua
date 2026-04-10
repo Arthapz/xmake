@@ -158,7 +158,9 @@ function should_build(target, module)
         return true
     end
 
-    profiler.enter(target:fullname(), "c++ modules", "builder", "check if " .. (module.name or module.sourcefile) .. " should be rebuilt")
+    local name = module.name or module.sourcefile
+
+    profiler.enter(target:fullname(), "c++ modules", "builder", "check if " .. name .. " should be rebuilt")
     local memcache = support.memcache()
     local _should_build = memcache:get2(target:fullname(), "should_build_" .. module.sourcefile)
     if _should_build == nil then
@@ -167,7 +169,7 @@ function should_build(target, module)
         if reused then
             local build = should_build(from, module)
             memcache:set2(target:fullname(), "should_build_" .. module.sourcefile, build)
-            profiler.leave(target:fullname(), "c++ modules", "builder", "check if " .. (module.name or module.sourcefile) .. " should be rebuilt")
+            profiler.leave(target:fullname(), "c++ modules", "builder", "check if " .. name .. " should be rebuilt")
             return build
         end
         local compinst = compiler.load("cxx", {target = target})
@@ -177,8 +179,14 @@ function should_build(target, module)
         local dependinfo = {}
         dependinfo.files = {module.sourcefile}
         dependinfo.values = {compinst:program(), compflags}
-        local objectfile_exists = (module.headerunit or support.is_bmionly(target, module.sourcefile)) and true or os.isfile(module.objectfile)
-        dependinfo.lastmtime = (os.isfile(module.bmifile or module.objectfile) and objectfile_exists) and os.mtime(dependfile) or 0
+        dependinfo.lastmtime = 0
+        if not target:is_rebuilt() then
+            if module.bmifile and os.isfile(module.bmifile) then
+                dependinfo.lastmtime = os.mtime(module.bmifile)
+            elseif not module.headerunit and not support.is_bmionly(target, module.sourcefile) and module.objectfile and os.isfile(module.objectfile) then
+                dependinfo.lastmtime = os.mtime(module.objectfile)
+            end
+        end
 
         local fileconfig = target:fileconfig(module.sourcefile)
         local from_package = fileconfig and fileconfig.from_package
@@ -192,7 +200,7 @@ function should_build(target, module)
         if dryrun or depend.is_changed(old_dependinfo, dependinfo) then
             depend.save(dependinfo, dependfile)
             memcache:set2(target:fullname(), "should_build_" .. module.sourcefile, true)
-            profiler.leave(target:fullname(), "c++ modules", "builder", "check if " .. (module.name or module.sourcefile) .. " should be rebuilt")
+            profiler.leave(target:fullname(), "c++ modules", "builder", "check if " .. name .. " should be rebuilt")
             return true
         end
 
@@ -203,16 +211,16 @@ function should_build(target, module)
             if should_build(target, mapped_dep) then
                 depend.save(dependinfo, dependfile)
                 memcache:set2(target:fullname(), "should_build_" .. module.sourcefile, true)
-                profiler.leave(target:fullname(), "c++ modules", "builder", "check if " .. (module.name or module.sourcefile) .. " should be rebuilt")
+                profiler.leave(target:fullname(), "c++ modules", "builder", "check if " .. name .. " should be rebuilt")
                 return true, true
             end
         end
 
         memcache:set2(target:fullname(), "should_build_" .. module.sourcefile, false)
-        profiler.leave(target:fullname(), "c++ modules", "builder", "check if " .. (module.name or module.sourcefile) .. " should be rebuilt")
+        profiler.leave(target:fullname(), "c++ modules", "builder", "check if " .. name .. " should be rebuilt")
         return false
     end
-    profiler.leave(target:fullname(), "c++ modules", "builder", "check if " .. (module.name or module.sourcefile) .. " should be rebuilt")
+    profiler.leave(target:fullname(), "c++ modules", "builder", "check if " .. name .. " should be rebuilt")
     return _should_build
 end
 
