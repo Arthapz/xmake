@@ -63,6 +63,7 @@ function _base(target, mode)
     target:add("defines", "WIN32_LEAN_AND_MEAN=1", "WINNT=1", "_WINDLL")
 
     -- add include directories
+    target:add("sysincludedirs", path.join(wdk.includedir, wdk.sdkver, "shared"))
     target:add("sysincludedirs", path.join(wdk.includedir, wdk.sdkver, mode))
     target:add("sysincludedirs", path.join(wdk.includedir, "wdf", mode .. "df", ver))
 
@@ -95,7 +96,6 @@ function kmdf(target)
     _base(target, "km")
 
     -- add include directories
-    target:add("sysincludedirs", path.join(wdk.includedir, wdk.sdkver, "shared"))
     if target:rule("wdk.driver") then
         target:add("sysincludedirs", path.join(wdk.includedir, wdk.sdkver, "km", "crt"))
     end
