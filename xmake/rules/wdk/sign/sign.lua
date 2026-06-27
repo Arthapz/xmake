@@ -90,6 +90,11 @@ function main(target, filepath, mode)
         table.insert(argv, digest_algorithm)
     end
 
+    local machine_store = target:values("wdk.sign.machine_store")
+    if machine_store then
+    	table.insert(argv, "/sm")
+    end
+    
     -- uses the default test certificate
     if mode == "test" and (not certfile and not thumbprint and not store) then
         table.insert(argv, "/a")
