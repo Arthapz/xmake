@@ -47,8 +47,15 @@ function _sudo(runner, cmd, ...)
     local sudo = find_sudo()
     assert(sudo, "sudo not found!")
 
+    local sudo_cmd
+    if is_host("windows") then
+        sudo_cmd = sudo .. " -E " .. cmd
+    else
+        sudo_cmd = sudo .. " " .. table.concat(_envars(true), " ") .. " " .. cmd
+    end
+    
     -- run it with administrator permission and preserve parent environment
-    runner(sudo .. " " .. table.concat(_envars(true), " ") .. " " .. cmd, ...)
+    runner(sudo_cmd, ...)
 end
 
 -- sudo run command with administrator permission and arguments list
@@ -62,8 +69,15 @@ function _sudov(runner, program, argv, opt)
     local sudo = find_sudo()
     assert(sudo, "sudo not found!")
 
+    local sudo_argv
+    if is_host("windows") then
+        sudo_argv = table.join("-E", program, argv)
+    else
+        sudo_argv = table.join(_envars(true), program, argv)
+    end
+    
     -- run it with administrator permission and preserve parent environment
-    runner(sudo, table.join(_envars(), program, argv), opt)
+    runner(sudo, sudo_argv, opt)
 end
 
 -- sudo run lua script with administrator permission and arguments list
