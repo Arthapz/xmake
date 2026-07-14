@@ -123,6 +123,8 @@ function _get_specvars(package)
     end
     specvars.PACKAGE_DATE = datestr or ""
     local author = package:get("author") or "unknown <unknown@unknown.com>"
+    local maintainer = package:get("maintainer") or author
+    specvars.PACKAGE_MAINTAINER = maintainer
     specvars.PACKAGE_COPYRIGHT = os.date("%Y") .. " " .. author
     specvars.PACKAGE_INSTALLCMDS = function ()
         local prefixdir = package:get("prefixdir")
@@ -253,7 +255,19 @@ function _pack_deb(debuild, package)
     archive.archive(archivefile, archivefiles, {curdir = rootdir, compress = "best"})
 
     -- build package
-    os.vrunv(debuild, {"-us", "-uc"}, {curdir = sourcedir})
+    -- https://github.com/xmake-io/xmake/issues/7626
+    local debuild_args = {}
+    local pathenv = os.getenv("PATH")
+
+    if pathenv and pathenv ~= "" then
+        table.insert(debuild_args, "-e")
+        table.insert(debuild_args, "PATH=" .. pathenv)
+    end
+
+    table.insert(debuild_args, "-us")
+    table.insert(debuild_args, "-uc")
+
+    os.vrunv(debuild, debuild_args, {curdir = sourcedir})
 
     -- copy deb file
     os.vcp(path.join(path.directory(sourcedir), "*.deb"), package:outputfile())
