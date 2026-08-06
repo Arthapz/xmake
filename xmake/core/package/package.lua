@@ -54,6 +54,16 @@ local sandbox_os     = require("sandbox/modules/os")
 local sandbox_module = require("sandbox/modules/import/core/sandbox/module")
 
 -- new an instance
+--
+-- @param name           the package name, the namespace prefix will be stripped and saved separately,
+--                       e.g. "zlib", "myns::zlib", but "vcpkg::zlib" will be kept as a whole,
+--                       because `vcpkg` is a package manager, but not a namespace
+-- @param info           the package description scope info
+-- @param opt            the options
+--                       - scriptdir: the directory of the package description file, the relative paths in
+--                                    this package will be relative to it
+--                       - repo: the repository instance which this package belongs to
+--
 function _instance.new(name, info, opt)
     opt = opt or {}
     local instance = table.inherit(_instance)
@@ -610,6 +620,11 @@ function _instance:is_toolchain()
     return self:kind() == "toolchain"
 end
 
+-- is plugin package?
+function _instance:is_plugin()
+    return self:kind() == "plugin"
+end
+
 -- is library package?
 --
 -- @return      true if the package kind is "library" or default
@@ -907,20 +922,24 @@ function _instance:installdir(...)
         installdir = self:get("installdir")
         if not installdir then
             local name = self:name():lower():gsub("::", "_")
-            if self:is_local() then
-                installdir = path.join(package.installdir({localdir = true}), name:sub(1, 1):lower(), name)
+            if self:is_plugin() then
+                installdir = path.join(global.directory(), "plugins", name)
             else
-                installdir = path.join(package.installdir(), name:sub(1, 1):lower(), name)
-            end
-            local version_str = self:version_str()
-            if version_str then
-                -- strip invalid characters on windows, e.g. `>= <=`
-                if os.is_host("windows") then
-                    version_str = version_str:gsub("[>=<|%*]", "")
+                if self:is_local() then
+                    installdir = path.join(package.installdir({localdir = true}), name:sub(1, 1):lower(), name)
+                else
+                    installdir = path.join(package.installdir(), name:sub(1, 1):lower(), name)
                 end
-                installdir = path.join(installdir, version_str)
+                local version_str = self:version_str()
+                if version_str then
+                    -- strip invalid characters on windows, e.g. `>= <=`
+                    if os.is_host("windows") then
+                        version_str = version_str:gsub("[>=<|%*]", "")
+                    end
+                    installdir = path.join(installdir, version_str)
+                end
+                installdir = path.join(installdir, self:buildhash())
             end
-            installdir = path.join(installdir, self:buildhash())
         end
         self._INSTALLDIR = installdir
     end
@@ -1136,7 +1155,7 @@ function _instance:_load()
         if on_load then
             on_load(self)
         end
-        
+
         -- load all components
         self:_load_components()
 
@@ -1173,6 +1192,11 @@ function _instance:_rawenvs()
             if os.host() == "macosx" then
                 envs.DYLD_LIBRARY_PATH = {"lib"}
             end
+        end
+
+        -- add plugin env for on_test
+        if self:is_plugin() then
+            envs.XMAKE_PLUGIN_DIRS = path.directory(self:installdir())
         end
         self._RAWENVS = envs
     end
@@ -2459,10 +2483,18 @@ function _instance:_generate_sanitizer_configs(checkmode, sourcekind)
     return toolchain_utils.get_sanitizer_flags(self, {checkmode = checkmode, sourcekind = sourcekind})
 end
 
--- generate building configs for has_xxx/check_xxx
-function _instance:_generate_build_configs(configs, opt)
-    opt = opt or {}
-    configs = table.join(self:fetch_librarydeps() or {}, configs)
+-- generate pic configs, e.g. -fPIC for the shared/relocatable compile in on_test/check_xxx (wasm ..)
+function _instance:_generate_pic_configs(sourcekind)
+    local configs = {}
+    if not self:is_plat("windows", "mingw") and
+        self:has_tool(sourcekind, "gcc", "gxx", "clang", "clangxx", "emcc", "emxx") then
+        configs.cxflags = "-fPIC"
+    end
+    return configs
+end
+
+-- generate runtime configs, e.g. -MD/-MT runtime flags
+function _instance:_generate_runtime_configs(sourcekind)
     -- since we are ignoring the runtimes of the headeronly library,
     -- we can only get the runtimes from the dependency library to detect the link.
     local runtimes = self:runtimes()
@@ -2474,43 +2506,43 @@ function _instance:_generate_build_configs(configs, opt)
             end
         end
     end
+    local configs = {}
     if runtimes then
         -- @note we need to patch package:sourcekinds(), because it wiil be called nf_runtime for gcc/clang
-        local sourcekind = opt.sourcekind or "cxx"
         self.sourcekinds = function (self)
             return sourcekind
         end
-        local compiler = self:compiler(sourcekind)
-        local cxflags = compiler:map_flags("runtime", runtimes, {target = self})
-        configs.cxflags = table.wrap(configs.cxflags)
-        table.insert(configs.cxflags, cxflags)
-
-        local ldflags = self:linker("binary", sourcekind):map_flags("runtime", runtimes, {target = self})
-        configs.ldflags = table.wrap(configs.ldflags)
-        table.insert(configs.ldflags, ldflags)
-
-        local shflags = self:linker("shared", sourcekind):map_flags("runtime", runtimes, {target = self})
-        configs.shflags = table.wrap(configs.shflags)
-        table.insert(configs.shflags, shflags)
+        configs.cxflags = self:compiler(sourcekind):map_flags("runtime", runtimes, {target = self})
+        configs.ldflags = self:linker("binary", sourcekind):map_flags("runtime", runtimes, {target = self})
+        configs.shflags = self:linker("shared", sourcekind):map_flags("runtime", runtimes, {target = self})
         self.sourcekinds = nil
     end
-    if self:config("lto") then
-        local configs_lto = self:_generate_lto_configs(opt.sourcekind or "cxx")
-        if configs_lto then
-            for k, v in pairs(configs_lto) do
-                configs[k] = table.wrap(configs[k] or {})
-                table.join2(configs[k], v)
-            end
+    return configs
+end
+
+-- generate building configs for has_xxx/check_xxx
+function _instance:_generate_build_configs(configs, opt)
+    opt = opt or {}
+    configs = table.join(self:fetch_librarydeps() or {}, configs)
+
+    -- merge the sub configs (e.g. {cxflags = ..., ldflags = ...}) into the result
+    local function _merge(subconfigs)
+        for k, v in pairs(subconfigs) do
+            configs[k] = table.wrap(configs[k] or {})
+            table.join2(configs[k], v)
         end
     end
+
+    local sourcekind = opt.sourcekind or "cxx"
+    _merge(self:_generate_runtime_configs(sourcekind))
+    if self:config("pic") ~= false then
+        _merge(self:_generate_pic_configs(sourcekind))
+    end
+    if self:config("lto") then
+        _merge(self:_generate_lto_configs(sourcekind))
+    end
     if self:config("asan") then
-        local configs_asan = self:_generate_sanitizer_configs("address", opt.sourcekind or "cxx")
-        if configs_asan then
-            for k, v in pairs(configs_asan) do
-                configs[k] = table.wrap(configs[k] or {})
-                table.join2(configs[k], v)
-            end
-        end
+        _merge(self:_generate_sanitizer_configs("address", sourcekind))
     end
     -- enable exceptions for msvc by default
     if opt.sourcekind == "cxx" and configs.exceptions == nil and self:has_tool("cxx", "cl") then
@@ -3007,6 +3039,14 @@ function package.searchdirs()
 end
 
 -- load the package from the system directories
+--
+-- it will be used for `add_requires("zlib", {system = true})` and the 3rd package managers,
+-- e.g. add_requires("vcpkg::zlib"), add_requires("conan::zlib/1.2.11")
+--
+-- @param packagename    the package name, e.g. "zlib", "vcpkg::zlib", "xmake::zlib"
+--
+-- @return the package instance and errors
+--
 function package.load_from_system(packagename)
 
     -- get package info
@@ -3075,6 +3115,15 @@ function package.load_from_system(packagename)
 end
 
 -- load the package from the project file
+--
+-- it will load the package which is defined by `package()` in the project xmake.lua,
+-- and we will also try to find it from the project namespaces if it's not found directly
+--
+-- @param packagename    the package name, e.g. "zlib", it can be without the namespace prefix
+-- @param project        the project module, we need to pass it to avoid the cyclic imports
+--
+-- @return the package instance and errors, it will be nil if this package is not defined in the project
+--
 function package.load_from_project(packagename, project)
 
     -- load packages (with cache)
@@ -3103,8 +3152,20 @@ function package.load_from_project(packagename, project)
 end
 
 -- load the package from the package directory or package description file
+--
+-- @param packagename    the package name, e.g. "zlib"
+-- @param packagedir     the package directory, we will load `packagedir/xmake.lua`, it can be nil if `opt.packagefile` is set
+-- @param opt            the options
+--                       - packagefile: load the package from the given description file directly instead of `packagedir/xmake.lua`
+--                       - plat: the given platform, we need to set it to the description scope at same time,
+--                               e.g. add_requires("zlib~mingw", {plat = "mingw"})
+--                               @see https://github.com/orgs/xmake-io/discussions/3439
+--                       - arch: the given architecture, it's the same as `opt.plat`
+--                       - repo: the repository instance which this package belongs to
+--
+-- @return the package instance and errors
+--
 function package.load_from_repository(packagename, packagedir, opt)
-
     opt = opt or {}
 
     -- find the package script path
@@ -3163,6 +3224,15 @@ function package.load_from_repository(packagename, packagedir, opt)
         packageinfo = results[packagename]
         if not packageinfo then
             return nil, string.format("%s: package(%s) not found!", scriptpath, packagename)
+        end
+
+        -- we need set the default on_install script if it's plugin package
+        if packageinfo:get("kind") == "plugin" and not packageinfo:get("install") then
+            -- only one code line, we can directly omit the sandbox wrapper.
+            local on_install = function (pkg)
+                os.cp("*", pkg:installdir())
+            end
+            packageinfo:set("install", on_install)
         end
 
         package._memcache():set2("packageinfos.repository", cachekey, packageinfo)

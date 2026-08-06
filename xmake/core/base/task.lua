@@ -81,9 +81,15 @@ end
 
 -- the directories of tasks
 function task._directories()
-    return {path.join(global.directory(), "plugins"),
-            path.join(os.programdir(), "plugins"),
-            path.join(os.programdir(), "actions")}
+    local dirs = {
+        path.join(global.directory(), "plugins"),
+        path.join(os.programdir(), "plugins"),
+        path.join(os.programdir(), "actions")}
+    local plugindirs = os.getenv("XMAKE_PLUGIN_DIRS")
+    if plugindirs then
+        table.insert(dirs, 1, plugindirs)
+    end
+    return dirs
 end
 
 -- translate menu
@@ -96,7 +102,7 @@ function task._translate_menu(taskname, menu)
         local options_full = {}
         for _, opt in ipairs(options) do
             if type(opt) == "function" then
-                local ok, results = sandbox.load(opt)
+                local ok, results = sandbox.call(opt)
                 if ok then
                     if results then
                         for _, opt in ipairs(results) do
@@ -141,7 +147,7 @@ function task._translate_menu(taskname, menu)
                         opt[i] = function ()
 
                             -- call it in the sandbox
-                            local ok, results = sandbox.load(description)
+                            local ok, results = sandbox.call(description)
                             if not ok then
                                 return nil, string.format("taskmenu: %s", results)
                             end
@@ -508,7 +514,7 @@ function task:run(...)
     local curdir = os.curdir()
 
     -- run task
-    local ok, errors = sandbox.load(on_run, ...)
+    local ok, errors = sandbox.call(on_run, ...)
 
     -- restore the current directory
     os.cd(curdir)
