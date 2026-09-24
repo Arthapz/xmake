@@ -354,6 +354,8 @@ function buildcmd_vfiles(target, batchcmds, sourcebatch, opt)
     if language_flags then
         table.join2(argv, language_flags)
     end
+    -- argv only contains command arguments passed to verilator
+    local depvalues = {verilator, table.clone(argv)}
     local sourcefiles = sourcebatch.sourcefiles
     for _, sourcefile in ipairs(sourcefiles) do
         batchcmds:show_progress(opt.progress, "${color.build.object}compiling.verilog %s", sourcefile)
@@ -369,6 +371,7 @@ function buildcmd_vfiles(target, batchcmds, sourcebatch, opt)
 
     -- generate c++ sourcefiles
     batchcmds:vrunv(verilator, argv, { envs = toolchain:runenvs() })
+    batchcmds:add_depvalues(depvalues)
     batchcmds:add_depfiles(sourcefiles)
     batchcmds:set_depmtime(os.mtime(makefile))
     batchcmds:set_depcache(dependfile)

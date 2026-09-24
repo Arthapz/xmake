@@ -120,6 +120,13 @@ function has_two_phase_compilation_support(_)
     return false
 end
 
+function has_precompile_reduced_bmi_support(_)
+    return false
+end
+
+function get_modulesprecompilereducedbmiflag(_)
+end
+
 -- build c++23 standard modules if needed
 function get_stdmodules(target, opt)
     opt = opt or {}

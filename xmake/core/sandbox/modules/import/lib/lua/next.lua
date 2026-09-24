@@ -1,0 +1,36 @@
+--!A cross-platform build utility based on Lua
+--
+-- Licensed under the Apache License, Version 2.0 (the "License");
+-- you may not use this file except in compliance with the License.
+-- You may obtain a copy of the License at
+--
+--     http://www.apache.org/licenses/LICENSE-2.0
+--
+-- Unless required by applicable law or agreed to in writing, software
+-- distributed under the License is distributed on an "AS IS" BASIS,
+-- WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+-- See the License for the specific language governing permissions and
+-- limitations under the License.
+--
+-- Copyright (C) 2015-present, Xmake Open Source Community.
+--
+-- @author      ruki
+-- @file        next.lua
+--
+
+-- the native lua `next`
+--
+-- it is not in the sandbox by default, `pairs` covers the iteration of a table. `next`
+-- is what is left for the two things `pairs` cannot say: whether a table is empty, and
+-- stepping a traversal by hand
+--
+-- @note the same in lua 5.1 and 5.4
+--
+-- e.g.
+--
+-- import("lib.lua.next")
+--
+-- if next(tbl) == nil then ... end    -- the table is empty
+-- local key, value = next(tbl)        -- the first entry, in no particular order
+--
+return next

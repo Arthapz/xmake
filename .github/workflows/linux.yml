@@ -62,12 +62,11 @@ jobs:
           sudo apt install -y dh-make rng-tools devscripts lintian
           echo "$PPA_GPG_PRIKEY_2C0C68C9" > ppa_gpg.key
           gpg --import ppa_gpg.key
-          scripts/makeppa questing # 25.10
-          scripts/makeppa plucky # 25.04
+          # @note only the series which are not obsolete on launchpad can be uploaded,
+          # @see https://api.launchpad.net/1.0/ubuntu/series
+          scripts/makeppa stonking # 26.10
+          scripts/makeppa resolute # 26.04
           scripts/makeppa noble # 24.04
-          scripts/makeppa mantic # 23.10
-          scripts/makeppa lunar # 23.04
-          scripts/makeppa kinetic # 22.10
           scripts/makeppa jammy # 22.04
           scripts/makeppa focal # 20.04
           scripts/makeppa bionic # 18.04

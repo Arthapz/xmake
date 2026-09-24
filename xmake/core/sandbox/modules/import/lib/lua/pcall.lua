@@ -1,0 +1,36 @@
+--!A cross-platform build utility based on Lua
+--
+-- Licensed under the Apache License, Version 2.0 (the "License");
+-- you may not use this file except in compliance with the License.
+-- You may obtain a copy of the License at
+--
+--     http://www.apache.org/licenses/LICENSE-2.0
+--
+-- Unless required by applicable law or agreed to in writing, software
+-- distributed under the License is distributed on an "AS IS" BASIS,
+-- WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+-- See the License for the specific language governing permissions and
+-- limitations under the License.
+--
+-- Copyright (C) 2015-present, Xmake Open Source Community.
+--
+-- @author      ruki
+-- @file        pcall.lua
+--
+
+-- the native lua `pcall`
+--
+-- it is not in the sandbox by default, `try`/`catch` is the idiomatic way to handle the
+-- errors of a script, and it keeps the traceback and the error message which xmake
+-- builds. `pcall` is the plain one, for the code which only needs a boolean
+--
+-- @note the same in lua 5.1 and 5.4. `xpcall` is not exported, its message handler
+-- takes the extra arguments only since 5.2
+--
+-- e.g.
+--
+-- import("lib.lua.pcall")
+--
+-- local ok, result = pcall(function () return 1 end)
+--
+return pcall

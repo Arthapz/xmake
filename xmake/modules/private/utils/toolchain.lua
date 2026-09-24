@@ -695,7 +695,7 @@ function get_zig_target(toolchain)
         end
 
         if toolchain:is_plat("cross") then
-            -- xmake f -p cross --toolchain=zig --cross=mips64el-linux-gnuabi64
+            -- xmake f -p cross --toolchain=zigcc --cross=mips64el-linux-gnuabi64
         elseif toolchain:is_plat("macosx") then
             --@see https://github.com/ziglang/zig/issues/14226
             target = arch .. "-macos-none"

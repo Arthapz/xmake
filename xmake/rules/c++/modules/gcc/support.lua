@@ -79,6 +79,13 @@ function has_two_phase_compilation_support(_)
     return false
 end
 
+function has_precompile_reduced_bmi_support(_)
+    return false
+end
+
+function get_modulesprecompilereducedbmiflag(_)
+end
+
 -- flags that doesn't affect bmi generation
 function strippeable_flags()
     -- speculative list as there is no resource that list flags that prevent reusability, this list will likely be improve over time

@@ -96,7 +96,11 @@ end
 
 -- resume the given coroutine
 function sandbox_core_base_scheduler.co_resume(co, ...)
-    return scheduler:resume(co:thread(), ...)
+    local ok, errors = scheduler:co_resume(co, ...)
+    if not ok then
+        raise(errors)
+    end
+    return ok, errors
 end
 
 -- suspend the current coroutine

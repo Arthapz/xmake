@@ -83,6 +83,8 @@ function policy.policies()
             ["build.c++.modules.hide_dependencies"] = {description = "Hide dependencies from the commandline when build C++ modules.", default = false, type = "boolean"},
             -- Enable two phase compilation for C++ modules if supported by the compiler
             ["build.c++.modules.two_phases"]      = {description = "Enable two phase compilation if supported.", default = true, type = "boolean"},
+            -- Use --precompile-reduced-bmi for Clang two-phase module compilation if supported
+            ["build.c++.modules.clang.precompile_reduced_bmi"] = {description = "Use --precompile-reduced-bmi for Clang two-phase module compilation if supported.", default = false, type = "boolean"},
             -- Enable std module
             ["build.c++.modules.std"]             = {description = "Enable std modules.", default = true, type = "boolean"},
             -- Enable unreferenced and non-public named module culling
@@ -158,6 +160,12 @@ function policy.policies()
             ["package.install_always"]            = {description = "Always install packages every time.", type = "boolean"},
             -- Install packages in the local project folder
             ["package.install_locally"]           = {description = "Install packages in the local project folder.", default = false, type = "boolean"},
+            -- Install the host packages in the local project folder
+            --
+            -- the host packages are the tools which build the other packages, e.g. the toolchains,
+            -- they do not depend on the project configuration and they are shared between the projects,
+            -- so they have their own policy, @see https://github.com/xmake-io/xmake/issues/7716
+            ["package.host.install_locally"]      = {description = "Install the host packages in the local project folder.", default = false, type = "boolean"},
             -- Keep package source code after installing (disable source dir cleanup)
             ["package.keep_source"]               = {description = "Keep package source code after installing.", default = false, type = "boolean"},
             -- Set custom headers when downloading package

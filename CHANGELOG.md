@@ -2,6 +2,42 @@
 
 ## master (unreleased)
 
+## v3.1.1
+
+### New features
+
+* [#7696](https://github.com/xmake-io/xmake/pull/7696): Add addons support, to extend xmake with plugins, rules, toolchains, templates, modules and includes files
+* [#7702](https://github.com/xmake-io/xmake/pull/7702): Auto-install the addons declared by a project and lock them in `xmake-addons.lock`
+* [#7714](https://github.com/xmake-io/xmake/pull/7714): Support `add_addons(...)` in `xmake.lua`
+* [#7706](https://github.com/xmake-io/xmake/pull/7706): Add tests for addons
+* [#7707](https://github.com/xmake-io/xmake/pull/7707): Add tests for the package definitions shipped by addons
+* [#7717](https://github.com/xmake-io/xmake/pull/7717): Move the `format` / `doxygen` / `macro` plugins to addons
+* [#7723](https://github.com/xmake-io/xmake/pull/7723): Add new cross-compilation architectures, e.g. SPARC64
+* [#7721](https://github.com/xmake-io/xmake/pull/7721): Add the `package.host.install_locally` policy
+* [#7699](https://github.com/xmake-io/xmake/pull/7699): Rework the templates directory and template distribution
+* Add the `pkg` package manager for BSD
+
+### Changes
+
+* [#7719](https://github.com/xmake-io/xmake/pull/7719): Propagate the vector extensions of a package to its consumers
+* [#7713](https://github.com/xmake-io/xmake/pull/7713): Run `hlsl2spv` / `glsl2spv` before the C++ module scan
+* [#7722](https://github.com/xmake-io/xmake/pull/7722): Improve the interpreter, project loading, search cache and semver
+* [#7733](https://github.com/xmake-io/xmake/pull/7733): Check the name conflicts of the global modules of addons
+* [#7726](https://github.com/xmake-io/xmake/pull/7726): Improve the mingw toolchain for clang and libc++
+
+### Bugs fixed
+
+* [#7737](https://github.com/xmake-io/xmake/pull/7737): Fix the duplicated packages of the nested builds when installing them locally
+* [#7738](https://github.com/xmake-io/xmake/issues/7738): Fix the platform menu of the remote build, e.g. `xmake f -p windows --wdk=xxx`
+* [#7710](https://github.com/xmake-io/xmake/pull/7710): Fix the link name of libraries ending with `.lib`
+* [#7709](https://github.com/xmake-io/xmake/pull/7709): Fix the runtime flags of clang
+* [#7703](https://github.com/xmake-io/xmake/pull/7703): Fix wix to recognize `x86_64` when passing `-arch`
+* [#7701](https://github.com/xmake-io/xmake/pull/7701): Fix the dependency check to detect appended nested values
+* [#7698](https://github.com/xmake-io/xmake/pull/7698): Fix the semver version selection and build metadata sorting
+* Fix `scheduler.co_resume` to raise the errors of the resumed coroutine
+
+## v3.1.0
+
 ### New features
 
 * [#7558](https://github.com/xmake-io/xmake/pull/7558): Add `check_alignof` / `alignof` detection support
@@ -30,6 +66,9 @@
 * [#7657](https://github.com/xmake-io/xmake/pull/7657): Update NDK sdkver for riscv64
 * [#7666](https://github.com/xmake-io/xmake/pull/7666): Improve vcpkg package discovery
 * [#7672](https://github.com/xmake-io/xmake/pull/7672): Add fallback download support
+* [#7688](https://github.com/xmake-io/xmake/pull/7688): Improve static libc++ runtime links for clang
+* [#7689](https://github.com/xmake-io/xmake/pull/7689): Rewrite `xmake plugin --install` to install plugins from xmake-repo as `plugin` kind packages, reusing the package installation flow
+* [#7693](https://github.com/xmake-io/xmake/pull/7693): Replace the deprecated tbox interfaces
 * Improve elf rpath cleaning and package path handling
 * Add xcodebuild detection
 * Update the bundled tbox
@@ -65,6 +104,8 @@
 * [#7679](https://github.com/xmake-io/xmake/pull/7679): Fix `set_pcheader` for msvc in C mode
 * [#7684](https://github.com/xmake-io/xmake/pull/7684): Fix wrong Lua stack index in `process.open`
 * [#7685](https://github.com/xmake-io/xmake/pull/7685): Fix engine resource leaks
+* [#7687](https://github.com/xmake-io/xmake/pull/7687): Fix the ninja generator to emit build edges for `win.sdk.resource` source batches ([#7682](https://github.com/xmake-io/xmake/issues/7682))
+* [#7692](https://github.com/xmake-io/xmake/pull/7692): Fix dependency order for `build.c++.modules.tryreuse`
 * Fix trybuild for scons
 
 ## v3.0.9
@@ -2483,6 +2524,42 @@
 
 ## master (开发中)
 
+## v3.1.1
+
+### 新特性
+
+* [#7696](https://github.com/xmake-io/xmake/pull/7696): 添加 addons 支持，可以用插件、规则、工具链、模板、模块和 includes 文件扩展 xmake
+* [#7702](https://github.com/xmake-io/xmake/pull/7702): 自动安装工程声明的 addon，并用 `xmake-addons.lock` 锁定版本
+* [#7714](https://github.com/xmake-io/xmake/pull/7714): 支持在 `xmake.lua` 中使用 `add_addons(...)`
+* [#7706](https://github.com/xmake-io/xmake/pull/7706): 添加 addon 测试
+* [#7707](https://github.com/xmake-io/xmake/pull/7707): 添加 addon 分发 package 定义的测试
+* [#7717](https://github.com/xmake-io/xmake/pull/7717): 将 `format` / `doxygen` / `macro` 插件迁移为 addon
+* [#7723](https://github.com/xmake-io/xmake/pull/7723): 添加新的交叉编译架构，例如 SPARC64
+* [#7721](https://github.com/xmake-io/xmake/pull/7721): 添加 `package.host.install_locally` 策略
+* [#7699](https://github.com/xmake-io/xmake/pull/7699): 重构模板目录和模板分发
+* 添加 BSD 的 `pkg` 包管理器支持
+
+### 改进
+
+* [#7719](https://github.com/xmake-io/xmake/pull/7719): 将包的向量扩展配置传递给使用它的目标
+* [#7713](https://github.com/xmake-io/xmake/pull/7713): 让 `hlsl2spv` / `glsl2spv` 在 C++ 模块扫描之前执行
+* [#7722](https://github.com/xmake-io/xmake/pull/7722): 改进 interpreter、工程加载、搜索缓存和 semver
+* [#7733](https://github.com/xmake-io/xmake/pull/7733): 检查 addon 全局模块的命名冲突
+* [#7726](https://github.com/xmake-io/xmake/pull/7726): 改进 mingw 工具链对 clang 和 libc++ 的支持
+
+### Bug 修复
+
+* [#7737](https://github.com/xmake-io/xmake/pull/7737): 修复本地安装包时，嵌套构建重复安装包的问题
+* [#7738](https://github.com/xmake-io/xmake/issues/7738): 修复远程编译下的平台菜单，例如 `xmake f -p windows --wdk=xxx`
+* [#7710](https://github.com/xmake-io/xmake/pull/7710): 修复 `.lib` 结尾的库名被错误裁剪的问题
+* [#7709](https://github.com/xmake-io/xmake/pull/7709): 修复 clang 的 runtime flags 检测
+* [#7703](https://github.com/xmake-io/xmake/pull/7703): 修复 wix 传递 `-arch` 时无法识别 `x86_64` 的问题
+* [#7701](https://github.com/xmake-io/xmake/pull/7701): 修复依赖检测无法发现嵌套值追加的问题
+* [#7698](https://github.com/xmake-io/xmake/pull/7698): 修复 semver 的版本选择和 build metadata 排序
+* 修复 `scheduler.co_resume`，让被恢复协程的错误能够正常抛出
+
+## v3.1.0
+
 ### 新特性
 
 * [#7558](https://github.com/xmake-io/xmake/pull/7558): 添加 `check_alignof` / `alignof` 检测支持
@@ -2511,6 +2588,9 @@
 * [#7657](https://github.com/xmake-io/xmake/pull/7657): 更新 riscv64 的 NDK sdkver
 * [#7666](https://github.com/xmake-io/xmake/pull/7666): 改进 vcpkg 包查找
 * [#7672](https://github.com/xmake-io/xmake/pull/7672): 添加下载失败回退支持
+* [#7688](https://github.com/xmake-io/xmake/pull/7688): 改进 clang 的静态 libc++ 运行时链接
+* [#7689](https://github.com/xmake-io/xmake/pull/7689): 重写 `xmake plugin --install`，将插件作为 `plugin` 类型的包从 xmake-repo 安装，复用包安装流程
+* [#7693](https://github.com/xmake-io/xmake/pull/7693): 替换 tbox 中已废弃的接口
 * 改进 elf rpath 清理和包路径处理
 * 添加 xcodebuild 检测
 * 更新内置的 tbox
@@ -2546,6 +2626,8 @@
 * [#7679](https://github.com/xmake-io/xmake/pull/7679): 修复 msvc 在 C 模式下的 `set_pcheader`
 * [#7684](https://github.com/xmake-io/xmake/pull/7684): 修复 `process.open` 中错误的 Lua 栈索引
 * [#7685](https://github.com/xmake-io/xmake/pull/7685): 修复引擎资源泄漏
+* [#7687](https://github.com/xmake-io/xmake/pull/7687): 修复 ninja 生成器未给 `win.sdk.resource` 源文件批次生成构建边的问题（[#7682](https://github.com/xmake-io/xmake/issues/7682)）
+* [#7692](https://github.com/xmake-io/xmake/pull/7692): 修复 `build.c++.modules.tryreuse` 的依赖顺序
 * 修复 scons 的 trybuild
 
 ## v3.0.9

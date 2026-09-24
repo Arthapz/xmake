@@ -4,11 +4,9 @@ import std;
 
 export auto my_sum2(std::size_t a, std::size_t b) -> std::size_t;
 
-#if defined(__GNUC__) && !defined(__clang__)
-inline
-#else
-module :private;
-#endif
-    auto my_sum2(std::size_t a, std::size_t b) -> std::size_t {
+// Clang 23 implements P1857R3, which rejects module directives controlled by
+// preprocessing conditionals. This test therefore uses an inline definition.
+// See https://wg21.link/P1857R3
+inline auto my_sum2(std::size_t a, std::size_t b) -> std::size_t {
   return a + a + b + b;
 }

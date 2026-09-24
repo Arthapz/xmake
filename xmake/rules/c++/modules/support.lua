@@ -92,7 +92,15 @@ function get_cpplibrary_name(target)
         end
     elseif target:is_plat("macosx", "iphoneos", "watchos", "appletvos", "applexros", "bsd", "harmony") then
         return "c++"
-    elseif target:is_plat("linux", "mingw", "cygwin", "msys", "haiku") then
+    elseif target:is_plat("linux", "cygwin", "msys", "haiku") then
+        return "stdc++"
+    elseif target:is_plat("mingw") then
+        local toolchain_inst = target:toolchain("mingw")
+        local is_clang = (toolchain_inst and toolchain_inst:config("clang")) or
+            target:has_tool("cxx", "clang", "clangxx", "clang_cl")
+        if is_clang then
+            return "c++"
+        end
         return "stdc++"
     elseif target:is_plat("windows") then
         return "msstl"
@@ -101,6 +109,14 @@ end
 
 function has_two_phase_compilation_support(target)
     return _support(target).has_two_phase_compilation_support(target)
+end
+
+function has_precompile_reduced_bmi_support(target)
+    return _support(target).has_precompile_reduced_bmi_support(target)
+end
+
+function get_modulesprecompilereducedbmiflag(target)
+    return _support(target).get_modulesprecompilereducedbmiflag(target)
 end
 
 -- strip flags not relevent for module reuse
@@ -429,4 +445,3 @@ function add_installfiles_for_modules(target, modules)
         end
     end
 end
-

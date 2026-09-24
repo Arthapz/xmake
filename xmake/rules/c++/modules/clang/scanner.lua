@@ -59,7 +59,8 @@ function scan_dependency_for(target, sourcefile, rescan, opt)
             if option.get("verbose") then
                 print(os.args(table.join(clangscandeps, dependency_flags)))
             end
-            local outdata, errdata = os.iorunv(clangscandeps, dependency_flags)
+            local outdata, errdata = os.iorunv(clangscandeps, dependency_flags,
+                {envs = compinst:runenvs()})
             assert(outdata, errdata)
 
             io.writefile(jsonfile, outdata)
@@ -77,7 +78,7 @@ function scan_dependency_for(target, sourcefile, rescan, opt)
                 end)
                 local ifile = path.translate(path.join(outputdir, path.filename(file) .. ".i"))
                 compflags = table.join(compflags or {}, keepsystemincludesflag or {}, {"-E", "-x", "c++", file, "-o", ifile})
-                os.vrunv(compinst:program(), compflags)
+                os.vrunv(compinst:program(), compflags, {envs = compinst:runenvs()})
                 local content = io.readfile(ifile)
                 os.rm(ifile)
                 return content

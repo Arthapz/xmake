@@ -37,6 +37,7 @@ local interpreter    = require("base/interpreter")
 local select_script  = require("base/private/select_script")
 local is_cross       = require("base/private/is_cross")
 local memcache       = require("cache/memcache")
+local addon          = require("package/addon")
 local toolchain      = require("tool/toolchain")
 local compiler       = require("tool/compiler")
 local linker         = require("tool/linker")
@@ -620,7 +621,19 @@ function _instance:is_toolchain()
     return self:kind() == "toolchain"
 end
 
+-- is addon package?
+--
+-- it will be installed to `~/.xmake/addons/<name>/<version>` and
+-- it can provide plugins, rules, toolchains, templates and modules for xmake
+--
+function _instance:is_addon()
+    return self:kind() == "addon"
+end
+
 -- is plugin package?
+--
+-- @note this kind is deprecated, please use the `addon` kind instead
+--
 function _instance:is_plugin()
     return self:kind() == "plugin"
 end
@@ -922,7 +935,15 @@ function _instance:installdir(...)
         installdir = self:get("installdir")
         if not installdir then
             local name = self:name():lower():gsub("::", "_")
-            if self:is_plugin() then
+            if self:is_addon() then
+                -- e.g. ~/.xmake/addons/<name>/<version>
+                local version_str = self:version_str() or "latest"
+                if os.is_host("windows") then
+                    version_str = version_str:gsub("[>=<|%*]", "")
+                end
+                installdir = addon.addondir(self:name(), version_str)
+            elseif self:is_plugin() then
+                -- deprecated, @see the `addon` kind
                 installdir = path.join(global.directory(), "plugins", name)
             else
                 if self:is_local() then
@@ -1194,10 +1215,6 @@ function _instance:_rawenvs()
             end
         end
 
-        -- add plugin env for on_test
-        if self:is_plugin() then
-            envs.XMAKE_PLUGIN_DIRS = path.directory(self:installdir())
-        end
         self._RAWENVS = envs
     end
     return envs
@@ -2100,11 +2117,17 @@ function _instance:fetch(opt)
 
     -- always install to the local project directory?
     -- @see https://github.com/xmake-io/xmake/pull/4376
+    --
+    -- @note the host packages are the tools which build the other packages, e.g. the toolchains,
+    -- they do not depend on the project configuration and they are shared between the projects,
+    -- so they are only installed locally with their own policy
+    -- @see https://github.com/xmake-io/xmake/issues/7716
+    local policyname = self:is_host() and "package.host.install_locally" or "package.install_locally"
     local install_locally
-    if project and project.policy("package.install_locally") then
+    if project and project.policy(policyname) then
         install_locally = true
     end
-    if install_locally == nil and self:policy("package.install_locally") then
+    if install_locally == nil and self:policy(policyname) then
         install_locally = true
     end
     if not self:is_local() and install_locally and system ~= true then
@@ -2512,9 +2535,20 @@ function _instance:_generate_runtime_configs(sourcekind)
         self.sourcekinds = function (self)
             return sourcekind
         end
-        configs.cxflags = self:compiler(sourcekind):map_flags("runtime", runtimes, {target = self})
-        configs.ldflags = self:linker("binary", sourcekind):map_flags("runtime", runtimes, {target = self})
-        configs.shflags = self:linker("shared", sourcekind):map_flags("runtime", runtimes, {target = self})
+        local cxflags = self:compiler(sourcekind):map_flags("runtime", runtimes, {target = self})
+        local ldflags = self:linker("binary", sourcekind):map_flags("runtime", runtimes, {target = self})
+        local shflags = self:linker("shared", sourcekind):map_flags("runtime", runtimes, {target = self})
+
+        -- @note the multi-argument flags must be checked as a whole, e.g. the clang runtime
+        -- flags on windows, `-Xclang --dependent-lib=xxx` would be broken if
+        -- `--dependent-lib=xxx` is checked and dropped separately
+        -- @see https://github.com/xmake-io/xmake/issues/7704
+        local group = function (flags)
+            return flags and #flags > 1 and {table.wrap_lock(flags)} or flags
+        end
+        configs.cxflags = group(cxflags)
+        configs.ldflags = group(ldflags)
+        configs.shflags = group(shflags)
         self.sourcekinds = nil
     end
     return configs
@@ -2544,8 +2578,8 @@ function _instance:_generate_build_configs(configs, opt)
     if self:config("asan") then
         _merge(self:_generate_sanitizer_configs("address", sourcekind))
     end
-    -- enable exceptions for msvc by default
-    if opt.sourcekind == "cxx" and configs.exceptions == nil and self:has_tool("cxx", "cl") then
+    -- enable exceptions for msvc and clang-cl by default
+    if opt.sourcekind == "cxx" and configs.exceptions == nil and self:has_tool("cxx", "cl", "clang_cl") then
         configs.exceptions = "cxx"
     end
 
@@ -2578,6 +2612,79 @@ function _instance:_generate_build_configs(configs, opt)
         end
     end
     return configs
+end
+
+-- has the given payloads? (only for the addon packages)
+--
+-- @param opt   the payloads to be checked, the value can be a string or a list, e.g.
+--              {rules = "app", toolchains = "esp32", plugins = "monitor",
+--               templates = "c/esp32.hello", modules = {"private.board", "private.flasher"}}
+--
+-- @return      true, or false and errors
+--
+-- e.g.
+--
+-- on_test(function (package)
+--     assert(package:has_addon({rules = "app", toolchains = "esp32"}))
+-- end)
+--
+function _instance:has_addon(opt)
+    if not self:is_addon() then
+        return false, string.format("package(%s) is not an addon!", self:name())
+    end
+
+    -- the addon should be registered after installing it
+    local addoninfo = addon.addons()[addon.dirname(self:name())]
+    if not addoninfo then
+        return false, string.format("addon(%s) is not installed!", self:name())
+    end
+    if opt == nil then
+        return true
+    end
+
+    local checkers = {}
+
+    -- the rules are namespaced, e.g. @addon/esp32-devel/app
+    --
+    -- @note we need to reload the global rules, this addon may be installed just now
+    checkers.rules = function (name)
+        local rule = require("project/rule")
+        rule.clear()
+        return rule.rules()["@addon/" .. self:name() .. "/" .. name] ~= nil
+    end
+
+    -- the toolchains are namespaced too, e.g. @addon/esp32-devel/esp32
+    checkers.toolchains = function (name)
+        return toolchain.load("@addon/" .. self:name() .. "/" .. name) ~= nil
+    end
+
+    -- the plugins and the templates are not namespaced, we get them from the addons registry,
+    -- the task list of this process has been loaded before installing this addon
+    checkers.plugins = function (name)
+        return table.contains(addoninfo.plugins or {}, name)
+    end
+    checkers.templates = function (name)
+        return table.contains(addoninfo.templates or {}, name)
+    end
+
+    -- the modules are files, e.g. modules/serial.lua, modules/private/board.lua
+    checkers.modules = function (name)
+        local modulepath = path.join(self:installdir(), "modules", (name:gsub("%.", "/")))
+        return os.isfile(modulepath .. ".lua") or os.isdir(modulepath)
+    end
+
+    for kind, names in pairs(opt) do
+        local checker = checkers[kind]
+        if not checker then
+            return false, string.format("unknown addon payload(%s), it should be one of rules, toolchains, plugins, templates and modules!", kind)
+        end
+        for _, name in ipairs(table.wrap(names)) do
+            if not checker(name) then
+                return false, string.format("%s(%s) not found in the addon(%s)!", kind, name, self:name())
+            end
+        end
+    end
+    return true
 end
 
 -- has the given c funcs?
@@ -3009,12 +3116,20 @@ end
 --
 -- @param opt   the options, e.g. {localdir = true}
 --              - localdir: return the local project packages directory (build/.packages)
---                          instead of the global directory (~/.xmake/packages)
+--                          instead of the global directory (~/.xmake/packages),
+--                          it can be overridden with `XMAKE_PKG_LOCALDIR`
 --
 -- @return      the install directory path
 --
 function package.installdir(opt)
     if opt and opt.localdir then
+        -- the parent process passes its local directory to the sub-process which builds
+        -- a package, so the packages it installs locally land in the same place and are
+        -- not installed twice, @see https://github.com/xmake-io/xmake/issues/7716
+        local localdir = os.getenv("XMAKE_PKG_LOCALDIR")
+        if localdir then
+            return path.normalize(path.absolute(localdir))
+        end
         return path.join(config.builddir({absolute = true}), ".packages")
     end
     local installdir = package._INSTALLDIR
@@ -3226,7 +3341,13 @@ function package.load_from_repository(packagename, packagedir, opt)
             return nil, string.format("%s: package(%s) not found!", scriptpath, packagename)
         end
 
+        -- we need set the default on_install script if it's addon package
+        if packageinfo:get("kind") == "addon" and not packageinfo:get("install") then
+            packageinfo:set("install", addon.installscript())
+        end
+
         -- we need set the default on_install script if it's plugin package
+        -- @note the plugin kind is deprecated, please use the addon kind instead
         if packageinfo:get("kind") == "plugin" and not packageinfo:get("install") then
             -- only one code line, we can directly omit the sandbox wrapper.
             local on_install = function (pkg)

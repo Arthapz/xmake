@@ -46,7 +46,10 @@ function _get_toolchain_includedirs_for_stlheaders(target, includedirs, clang)
             table.insert(argv, 1, "-stdlib=libstdc++")
         end
     end
-    local result = try {function () return os.iorunv(clang, argv, {envs = compinst:runenvs()}) end}
+    local compinst = target:compiler("cxx")
+    local result = try {function ()
+        return os.iorunv(clang, argv, {envs = compinst and compinst:runenvs()})
+    end}
     if result then
         for _, line in ipairs(result:split("\n", {plain = true})) do
             local line = line:trim()
@@ -64,17 +67,25 @@ end
 
 function _get_std_module_manifest_path(target)
     local print_module_manifest_flag = get_print_library_module_manifest_path_flag(target)
-    local clang_path = path.directory(get_clang_path(target))
+    local clang_path = get_clang_path(target)
+    if not clang_path then
+        return
+    end
+    local clang_dir = path.directory(clang_path)
     if print_module_manifest_flag then
         local compinst = target:compiler("cxx")
-        local outdata, _ = try { function() return os.iorunv(compinst:program(), {"-std=c++23", "-stdlib=libc++", "--sysroot=" .. path.join(clang_path, ".."), print_module_manifest_flag}, {envs = compinst:runenvs()}) end }
+        local sysroot = "--sysroot=" .. path.join(clang_dir, "..")
+        local flags = {"-std=c++23", "-stdlib=libc++", sysroot, print_module_manifest_flag}
+        local outdata, _ = try {function()
+            return os.iorunv(compinst:program(), flags, {envs = compinst:runenvs()})
+        end}
         if outdata and not outdata:startswith("<NOT PRESENT>") then
             return outdata:trim()
         end
     end
     -- fallback on custom detection
     -- manifest can be found in <llvm_path>/lib subdirectory (i.e on debian it should be <llvm_path>/lib/x86_64-unknown-linux-gnu/)
-    local clang_lib_path = path.join(clang_path, "..", "lib")
+    local clang_lib_path = path.join(clang_dir, "..", "lib")
     local modules_json_path = path.join(clang_lib_path, "libc++.modules.json")
     if not os.isfile(modules_json_path) then
         modules_json_path = find_file("*/libc++.modules.json", clang_lib_path)
@@ -119,6 +130,13 @@ function has_two_phase_compilation_support(target)
     return target:policy("build.c++.modules.two_phases")
 end
 
+function has_precompile_reduced_bmi_support(target)
+    if not target:policy("build.c++.modules.clang.precompile_reduced_bmi") or not has_two_phase_compilation_support(target) then
+        return false
+    end
+    return get_modulesprecompilereducedbmiflag(target) ~= nil
+end
+
 -- flags that doesn't affect bmi generation
 function strippeable_flags()
     -- speculative list as there is no resource that list flags that prevent reusability, this list will likely be improve over time
@@ -161,7 +179,11 @@ function toolchain_includedirs(target)
                 runtime_flag = "-stdlib=libstdc++"
             end
         end
-        local _, result = try {function () return os.iorunv(clang, table.join({"-E", "-Wp,-v", "-xc++", os.nuldev()}, runtime_flag or {})) end}
+        local compinst = target:compiler("cxx")
+        local flags = table.join({"-E", "-Wp,-v", "-xc++", os.nuldev()}, runtime_flag or {})
+        local _, result = try {function ()
+            return os.iorunv(clang, flags, {envs = compinst and compinst:runenvs()})
+        end}
         if result then
             for _, line in ipairs(result:split("\n", {plain = true})) do
                 local line = line:trim()
@@ -183,8 +205,10 @@ function get_clang_path(target)
     if not clang_path then
         local program, toolname = target:tool("cxx")
         if program and toolname:startswith("clang") then
+            local compinst = target:compiler("cxx")
+            local envs = compinst and compinst:runenvs() or os.getenvs()
             local clang = find_tool(toolname, {program = program,
-                envs = os.getenvs(), cachekey = "modules_support_clang_" .. toolname})
+                envs = envs, cachekey = "modules_support_clang_" .. toolname})
             if clang then
                 clang_path = clang.program
             end
@@ -201,8 +225,10 @@ function get_clang_version(target)
     if not clang_version then
         local program, toolname = target:tool("cxx")
         if program and toolname:startswith("clang") then
+            local compinst = target:compiler("cxx")
+            local envs = compinst and compinst:runenvs() or os.getenvs()
             local clang = find_tool(toolname, {program = program, version = true,
-                envs = os.getenvs(), cachekey = "modules_support_clang_" .. toolname})
+                envs = envs, cachekey = "modules_support_clang_" .. toolname})
             if clang then
                 clang_version = clang.version
             end
@@ -229,10 +255,13 @@ function get_clang_scan_deps(target)
             if dir and dir ~= "." and os.isdir(dir) then
                 program = path.join(dir, program)
             end
-            local result = find_tool("clang-scan-deps", {program = program, version = true})
+            local compinst = target:compiler("cxx")
+            local envs = compinst and compinst:runenvs() or os.getenvs()
+            local result = find_tool("clang-scan-deps",
+                {program = program, version = true, envs = envs})
             if not result then
                 -- find a system wide alternative
-                result = find_tool("clang-scan-deps", {version = true})
+                result = find_tool("clang-scan-deps", {version = true, envs = envs})
             end
             if result then
                 clang_scan_deps = result.program
@@ -295,9 +324,16 @@ function get_stdmodules(target)
                 return {path.normalize(path.join(try_std_module_directory, "std.cppm")), path.normalize(path.join(try_std_module_directory, "std.compat.cppm"))}
             end
             -- then try the directory relative to clang bin directory
-            try_std_module_directory = path.join(path.directory(get_original_file(get_clang_path(target))), std_module_directory)
-            if os.isdir(try_std_module_directory) then
-                return {path.normalize(path.join(try_std_module_directory, "std.cppm")), path.normalize(path.join(try_std_module_directory, "std.compat.cppm"))}
+            local clang_path = get_clang_path(target)
+            if clang_path then
+                local clang_dir = path.directory(get_original_file(clang_path))
+                try_std_module_directory = path.join(clang_dir, std_module_directory)
+                if os.isdir(try_std_module_directory) then
+                    return {
+                        path.normalize(path.join(try_std_module_directory, "std.cppm")),
+                        path.normalize(path.join(try_std_module_directory, "std.compat.cppm"))
+                    }
+                end
             end
         elseif cpplib == "stdc++" then
             -- dont be greedy and don't enable stdc++ std module support for llvm < 19
@@ -380,6 +416,25 @@ function get_modulesreducedbmiflag(target)
         _g.modulesreducedbmiflag = modulesreducedbmiflag or false
     end
     return modulesreducedbmiflag or nil
+end
+
+function get_modulesprecompilereducedbmiflag(target)
+    local modulesprecompilereducedbmiflag = _g.modulesprecompilereducedbmiflag
+    if modulesprecompilereducedbmiflag == nil then
+        local compinst = target:compiler("cxx")
+        local checkflags = "--precompile-reduced-bmi"
+        if target:has_tool("cxx", "clang_cl") then
+            -- clang_cl.has_flags() appends -c and treats unused-argument warnings as errors,
+            -- but --precompile-reduced-bmi does not use -c. Ignore that specific warning and
+            -- treat unknown-argument warnings as errors to reject unsupported flags.
+            checkflags = {checkflags, "-Wno-unused-command-line-argument", "-Werror=unknown-argument"}
+        end
+        if compinst:has_flags(checkflags, "cxxflags", {flagskey = "clang_modules_precompile_reduced_bmi", tryrun = true}) then
+            modulesprecompilereducedbmiflag = "--precompile-reduced-bmi"
+        end
+        _g.modulesprecompilereducedbmiflag = modulesprecompilereducedbmiflag or false
+    end
+    return modulesprecompilereducedbmiflag or nil
 end
 
 function has_clangscandepssupport(target)

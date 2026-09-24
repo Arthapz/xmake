@@ -42,7 +42,7 @@ function _remote_build_is_connected()
     local projectdir = os.projectdir()
     local projectfile = os.projectfile()
     if projectfile and os.isfile(projectfile) and projectdir then
-        local workdir = path.join(config.directory(), "remote_build")
+        local workdir = path.join(config.directory(), "service", "remote_build")
         local statusfile = path.join(workdir, "status.txt")
         if os.isfile(statusfile) then
             local status = io.load(statusfile)

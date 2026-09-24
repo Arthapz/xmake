@@ -1,0 +1,7 @@
+export module hello;
+
+import base;
+
+export int answer() {
+    return base_value() + 2;
+}

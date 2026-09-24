@@ -28,6 +28,7 @@ local table      = require("base/table")
 local utils      = require("base/utils")
 local string     = require("base/string")
 local hashset    = require("base/hashset")
+local semver     = require("base/semver")
 local scopeinfo  = require("base/scopeinfo")
 local deprecated = require("base/deprecated")
 local sandbox    = require("sandbox/sandbox")
@@ -877,6 +878,33 @@ end
 function interpreter:scriptdir()
     assert(self and self._PRIVATE and self._PRIVATE._CURFILE)
     return path.directory(self._PRIVATE._CURFILE)
+end
+
+-- add a resolver for the references of includes(), e.g. includes("@addon/esp32/check")
+--
+-- @param resolver  function (interp, reference), it returns the files, or nil and errors
+--
+-- @note the interpreter knows nothing about the references, the callers register the
+-- resolvers which they support, e.g. @see project._interpreter()
+--
+function interpreter:includes_resolver_add(resolver)
+    local resolvers = self._PRIVATE._INCLUDES_RESOLVERS or {}
+    table.insert(resolvers, resolver)
+    self._PRIVATE._INCLUDES_RESOLVERS = resolvers
+end
+
+-- do we ignore the unresolvable references of includes()? e.g. includes("@addon/esp32/board")
+function interpreter:includes_unresolved()
+    return self._PRIVATE._INCLUDES_UNRESOLVED
+end
+
+-- ignore the unresolvable references of includes() instead of raising errors
+--
+-- @note the project file may reference the resources which have not been installed yet,
+-- so the caller can load it, install them and load it again, @see project._load()
+--
+function interpreter:includes_unresolved_set(enabled)
+    self._PRIVATE._INCLUDES_UNRESOLVED = enabled
 end
 
 -- set root scope kind
@@ -1757,35 +1785,35 @@ function interpreter:api_define(apis)
 end
 
 -- the builtin api: set_xmakever()
-function interpreter:api_builtin_set_xmakever(minver)
-
-    -- no version
-    if not minver then
+function interpreter:api_builtin_set_xmakever(minver_str)
+    if minver_str == nil then
         interpreter._raise("set_xmakever(): no version!")
     end
-
-    -- parse minimum version
-    local minvers = minver:split('.', {plain = true})
-    if not minvers or #minvers ~= 3 then
-        interpreter._raise(string.format("set_xmakever(\"%s\"): invalid version format!", minver))
+    if type(minver_str) ~= "string" then
+        interpreter._raise(string.format("set_xmakever(): invalid version, expected a string, got %s", type(minver_str)))
     end
 
-    -- make minimum numerical version
-    local minvers_num = minvers[1] * 100 + minvers[2] * 10 + minvers[3]
+    local curver = xmake.version()
+    local minver, errors = semver.new(minver_str)
+    if not minver then
+        interpreter._raise(string.format("set_xmakever(\"%s\"): invalid version, %s", minver_str, errors or "unknown"))
+    end
 
-    -- parse current version
-    local curvers = xmake._VERSION_SHORT:split('.', {plain = true})
-
-    -- make current numerical version
-    local curvers_num = curvers[1] * 100 + curvers[2] * 10 + curvers[3]
-
-    -- check version
-    if curvers_num < minvers_num then
-        interpreter._raise(string.format("xmake v%s < v%s, please run `$xmake update` to upgrade xmake!", xmake._VERSION_SHORT, minver))
+    if curver:lt(minver) then
+        interpreter._raise(string.format("xmake v%s < v%s, please run `$xmake update` to upgrade xmake!", curver:rawstr(), minver_str))
     end
 end
 
 -- the builtin api: includes()
+-- find the include files of the builtin includes, e.g. includes("@builtin/check")
+function interpreter:_find_builtin_includes(subpath)
+    local builtin_path = subpath:sub(#"@builtin/" + 1)
+    if builtin_path:endswith(".lua") then
+        return os.files(path.join(os.programdir(), "includes", builtin_path))
+    end
+    return os.files(path.join(os.programdir(), "includes", builtin_path, "xmake.lua"))
+end
+
 function interpreter:api_builtin_includes(...)
     assert(self and self._PRIVATE and self._PRIVATE._ROOTDIR and self._PRIVATE._MTIMES)
     local curfile = self._PRIVATE._CURFILE
@@ -1799,16 +1827,29 @@ function interpreter:api_builtin_includes(...)
         -- attempt to find files from programdir/includes/*.lua
         -- e.g. includes("@builtin/check")
         if subpath:startswith("@builtin/") then
-            local builtin_path = subpath:sub(10)
-            local files
-            if builtin_path:endswith(".lua") then
-                files = os.files(path.join(os.programdir(), "includes", builtin_path))
-            else
-                files = os.files(path.join(os.programdir(), "includes", builtin_path, "xmake.lua"))
-            end
+            local files = self:_find_builtin_includes(subpath)
             if files and #files > 0 then
                 table.join2(subpaths_matched, files)
                 found = true
+            end
+        end
+        -- attempt to find files from the registered resolvers of the references
+        -- e.g. includes("@addon/esp32/check"), @see interpreter:includes_resolver_add()
+        if not found and subpath:startswith("@") then
+            for _, resolver in ipairs(self._PRIVATE._INCLUDES_RESOLVERS or {}) do
+                local files, errors = resolver(self, subpath)
+                if files then
+                    table.join2(subpaths_matched, files)
+                    found = true
+                    break
+                elseif errors then
+                    -- it has not been resolved yet? the caller may load this file again
+                    if self:includes_unresolved() then
+                        found = true
+                        break
+                    end
+                    os.raise(errors)
+                end
             end
         end
         -- find the given files from the project directory

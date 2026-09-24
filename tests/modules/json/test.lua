@@ -33,6 +33,7 @@ function test_json_decode(t)
     t:are_equal(json_decode('[1,"2"]'), {1, "2"})
     t:are_equal(json_decode('[1,"2", {"a":1, "b":true}]'), {1, "2", {a = 1, b = true}})
     t:are_equal(json_decode('[1,0xa,0xdeadbeef, 0xffffffff,-1]'), {1, 0xa, 0xdeadbeef, 0xffffffff, -1})
+    t:are_equal(json_decode('"a\\u0041b"'), "aAb")
 end
 
 function test_json_encode(t)
@@ -64,6 +65,13 @@ function test_pure_json_decode(t)
     t:are_equal(json_pure_decode('[1,"2"]'), {1, "2"})
     t:are_equal(json_pure_decode('[1,"2", {"a":1, "b":true}]'), {1, "2", {a = 1, b = true}})
     t:are_equal(json_pure_decode('[1,0xa,0xdeadbeef, 0xffffffff,-1]'), {1, 0xa, 0xdeadbeef, 0xffffffff, -1})
+    t:are_equal(json_pure_decode('"a\\u0041b"'), "aAb")
+    t:are_equal(json_pure_decode('"\\u4e2d\\u6587"'), "\228\184\173\230\150\135")
+    t:are_equal(json_pure_decode('"\\u00e9"'), "\195\169")
+    t:are_equal(json_pure_decode('"\\uD83D\\uDE00"'), "\240\159\152\128")
+    t:will_raise(function ()
+        json_pure_decode('"\\uD83D"')
+    end)
 end
 
 function test_pure_json_encode(t)

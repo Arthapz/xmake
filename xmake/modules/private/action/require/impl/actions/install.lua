@@ -22,6 +22,7 @@
 import("core.base.option")
 import("core.base.tty")
 import("core.package.package", {alias = "core_package"})
+import("core.package.addon")
 import("core.project.target")
 import("core.project.project")
 import("core.platform.platform")
@@ -283,6 +284,50 @@ function _merge_staticlibs(package)
     end
 end
 
+-- register the installed addon, so that xmake can find its payloads, e.g. plugins
+--
+-- @note the addon manifest(addon.lua) is only read when installing it, everything which
+-- is needed later is recorded in the addons registry, @see core/package/addon.lua
+--
+function _register_addon(package)
+
+    -- get the addon deps from the package recipe
+    local deps
+    for _, dep in ipairs(package:plaindeps() or {}) do
+        if dep:is_addon() then
+            deps = deps or {}
+            table.insert(deps, dep:name())
+        end
+    end
+
+    -- the addon describes itself? we prefer its own description
+    --
+    -- @note the deps are duplicated in its manifest, but the recipe is authoritative,
+    -- xmake needs them before downloading the addon sources, so we only report the
+    -- mismatch, they must be kept in sync
+    --
+    local description = package:description()
+    local manifest = package:data("addon.manifest")
+    if manifest then
+        description = manifest.description or description
+        for _, dep in ipairs(manifest.deps) do
+            if not (deps and table.contains(deps, dep)) then
+                wprint("addon(%s): dep(%s) is declared in its manifest, but not in the package recipe!",
+                    package:name(), dep)
+            end
+        end
+    end
+
+    -- we also record where it comes from, so that the projects can lock it,
+    -- @see xmake/modules/private/action/addon/impl/install_addons.lua
+    local repo = package:repo()
+    addon.register(package:name(), package:version_str() or "latest",
+        {description = description, deps = deps,
+         repo = repo and {url = repo:url(), commit = repo:commit(), branch = repo:branch()} or nil,
+         manifest_deps = manifest and manifest.deps or nil,
+         globalmodules = manifest and #manifest.globalmodules > 0 and manifest.globalmodules or nil})
+end
+
 -- get failed install directory
 function _get_installdir_failed(package)
     return path.join(package:cachedir(), "installdir.failed")
@@ -367,18 +412,9 @@ function _leave_workdir(package, oldir)
     _clear_sourcedir(package)
 end
 
--- enter package install environments
-function _enter_package_installenvs(package)
-    for _, dep in ipairs(package:orderdeps()) do
-        dep:envs_enter()
-    end
-end
-
--- enter package test environments
-function _enter_package_testenvs(package)
-
-    -- add compiler runtime library directory to $PATH
-    -- @see https://github.com/xmake-io/xmake-repo/pull/3606
+-- add compiler runtime library directory to $PATH
+-- @see https://github.com/xmake-io/xmake-repo/pull/3606
+function _enter_toolchain_runenvs(package)
     if is_host("windows") and package:is_plat("windows", "mingw") then -- bin/*.dll for windows
         local toolchains = package:toolchains()
         if not toolchains then
@@ -395,8 +431,19 @@ function _enter_package_testenvs(package)
             end
         end
     end
+end
 
-    -- enter package environments
+-- enter package install environments
+function _enter_package_installenvs(package)
+    _enter_toolchain_runenvs(package)
+    for _, dep in ipairs(package:orderdeps()) do
+        dep:envs_enter()
+    end
+end
+
+-- enter package test environments
+function _enter_package_testenvs(package)
+    _enter_toolchain_runenvs(package)
     for _, dep in ipairs(package:orderdeps()) do
         dep:envs_enter()
     end
@@ -499,6 +546,11 @@ function main(package)
 
                     -- save the package info to the manifest file
                     package:manifest_save()
+
+                    -- register this addon, so that xmake can find its payloads, e.g. plugins
+                    if package:is_addon() then
+                        _register_addon(package)
+                    end
                     installed_now = true
                 end
             end
@@ -567,6 +619,13 @@ function main(package)
                     errorfile = path.join(installdir_failed, "logs", "install.txt")
                 end
                 os.tryrm(installdir)
+
+                -- the addon is registered before testing it, its `on_test` needs to use it,
+                -- e.g. xmake create -t esp32.blink, so we need to unregister it again here,
+                -- otherwise it would be seen as installed while its files are gone
+                if package:is_addon() then
+                    addon.unregister(package:name(), package:version_str() or "latest")
+                end
 
                 -- is not last scheme? we can fallback to next scheme and try reinstall it again
                 local current_scheme = package:current_scheme()

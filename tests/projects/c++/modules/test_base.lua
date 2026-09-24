@@ -103,6 +103,9 @@ function build_tests(toolchain_name, opt)
     local policies = "--policies=build.c++.modules.std:" .. (opt.stdmodule and "y" or "n")
     policies = policies .. ",build.c++.modules.fallbackscanner:" .. (opt.fallbackscanner and "y" or "n")
     policies = policies .. ",build.c++.modules.two_phases:" .. (two_phases and "y" or "n")
+    if opt.precompile_reduced_bmi ~= nil then
+        policies = policies .. ",build.c++.modules.clang.precompile_reduced_bmi:" .. (opt.precompile_reduced_bmi and "y" or "n")
+    end
 
     local platform = " "
     if opt.platform then
@@ -127,7 +130,7 @@ function build_tests(toolchain_name, opt)
     os.exec("xmake clean -a")
     os.exec("xmake f" .. platform .. "--toolchain=" .. toolchain_name .. runtimes .. "-c --yes " .. policies .. flags)
     if opt.build then
-        opt.build()
+        opt.build(table.join(opt, {toolchain = toolchain_name, two_phases = two_phases}))
     else
         _build(opt.check_outdata)
     end
@@ -150,9 +153,12 @@ function run_tests(clang_options, gcc_options, msvc_options)
             if not clang_options.disable_clang_cl then
                 local clang_cl_options = table.clone(clang_options)
                 clang_cl_options.compiler = "clang-cl"
-                clang_cl_options.version = clang_cl_min_ver()
+                local clang_cl_minver = clang_cl_min_ver()
+                if semver.compare(clang_cl_options.version, clang_cl_minver) < 0 then
+                    clang_cl_options.version = clang_cl_minver
+                end
                 build_tests("clang-cl", clang_cl_options)
-                build_tests("clang-cl", table.join(clang_options, {two_phases = false}))
+                build_tests("clang-cl", table.join(clang_cl_options, {two_phases = false}))
             end
             if clang_options.stdmodule then
                 wprint("std modules tests skipped for Windows clang libc++ as it's not currently supported officially")

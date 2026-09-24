@@ -65,6 +65,8 @@ function _make_modulebuildflags(target, module, opt)
 
     local modules_reduced_bmi_flag = support.get_modulesreducedbmiflag(target)
     local has_two_phases = target:policy("build.c++.modules.two_phases")
+    local has_precompile_reduced_bmi = support.has_precompile_reduced_bmi_support(target)
+    local modules_precompile_reduced_bmi_flag = has_precompile_reduced_bmi and support.get_modulesprecompilereducedbmiflag(target)
     local flags
     if opt.bmi then
         local module_outputflag = support.get_moduleoutputflag(target)
@@ -72,7 +74,7 @@ function _make_modulebuildflags(target, module, opt)
         flags = {"-x", "c++-module"}
 
         if not opt.objectfile then
-            table.insert(flags, "--precompile")
+            table.insert(flags, modules_precompile_reduced_bmi_flag or "--precompile")
             if target:has_tool("cxx", "clang_cl") then
                 table.join2(flags, "/clang:-o", "/clang:" .. module.bmifile)
             end
@@ -92,7 +94,7 @@ function _make_modulebuildflags(target, module, opt)
         end
     else
         flags = {}
-        if not has_two_phases or not module.bmifile then
+        if (has_precompile_reduced_bmi and support.has_module_extension(module.sourcefile)) or not has_two_phases or not module.bmifile then
             flags = {"-x", "c++"}
         end
         local std = (module.name == "std" or module.name == "std.compat")
@@ -171,7 +173,7 @@ function _compile(target, flags, module, opt)
 
     opt = opt or {}
     local sourcefile = module.sourcefile
-    if not opt.bmi and opt.objectfile and module.bmifile then
+    if not support.has_precompile_reduced_bmi_support(target) and not opt.bmi and opt.objectfile and module.bmifile then
         sourcefile = module.bmifile
     end
     local outputfile = ((opt.bmi and not opt.objectfile) or opt.headerunit) and module.bmifile or module.objectfile

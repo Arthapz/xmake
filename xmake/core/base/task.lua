@@ -24,10 +24,12 @@ local task = task or {}
 -- load modules
 local os            = require("base/os")
 local table         = require("base/table")
+local utils         = require("base/utils")
 local string        = require("base/string")
 local global        = require("base/global")
 local hashset       = require("base/hashset")
 local interpreter   = require("base/interpreter")
+local addon         = require("package/addon")
 local sandbox       = require("sandbox/sandbox")
 local config        = require("project/config")
 local sandbox_os    = require("sandbox/modules/os")
@@ -81,13 +83,21 @@ end
 
 -- the directories of tasks
 function task._directories()
-    local dirs = {
-        path.join(global.directory(), "plugins"),
-        path.join(os.programdir(), "plugins"),
-        path.join(os.programdir(), "actions")}
-    local plugindirs = os.getenv("XMAKE_PLUGIN_DIRS")
-    if plugindirs then
-        table.insert(dirs, 1, plugindirs)
+    local dirs = task._DIRECTORIES
+    if dirs == nil then
+        -- add the plugins of the installed addons first, e.g. ~/.xmake/addons/<name>/<version>/plugins
+        --
+        -- we get them from the addons registry file directly,
+        -- so we do not need to scan the whole addons directory on startup
+        --
+        -- @note the first one wins, so an addon is able to take over a deprecated
+        -- builtin plugin, e.g. `xmake format`
+        --
+        dirs = addon.payloads("plugins")
+        table.insert(dirs, path.join(global.directory(), "plugins"))
+        table.insert(dirs, path.join(os.programdir(), "plugins"))
+        table.insert(dirs, path.join(os.programdir(), "actions"))
+        task._DIRECTORIES = dirs
     end
     return dirs
 end
@@ -391,6 +401,39 @@ function task.new(name, info)
     return instance
 end
 
+-- is the given plugin conflicting with the loaded one?
+--
+-- the plugins are not namespaced, so the first one always wins, @see task._directories(),
+-- but we need to report the conflicts of the addons, otherwise we do not know which
+-- plugin will be run
+--
+-- @param taskname  the task name
+-- @param taskfile  the task file of the loaded plugin, it will be nil if it's the first one
+-- @param filepath  the task file of the plugin which we are loading
+--
+function task._is_conflicting(taskname, taskfile, filepath)
+    if not taskfile then
+        return false
+    end
+
+    -- we only report it if both of them come from the addons, taking over a builtin
+    -- plugin is expected, e.g. `xmake format` has been moved to an addon
+    --
+    -- @note we cannot raise errors here, otherwise all the commands will be broken,
+    -- and the user cannot even remove the conflicting addons
+    local addondir = path.absolute(addon.installdir())
+    if path.absolute(taskfile):startswith(addondir) and path.absolute(filepath):startswith(addondir) then
+        utils.warning("plugin(%s) conflicts, we will use the first one!\n  -> %s\n  -> %s", taskname, taskfile, filepath)
+    end
+    return true
+end
+
+-- clear the loaded tasks, e.g. some addons may be installed just now
+function task.clear()
+    task._TASKS = nil
+    task._DIRECTORIES = nil
+end
+
 -- get all registered tasks
 --
 -- @return      the tasks table {name = task, ...}
@@ -402,6 +445,7 @@ function task.tasks()
 
     -- load tasks
     local tasks = {}
+    local taskfiles = {}
     local dirs = task._directories()
     for _, dir in ipairs(dirs) do
         local files = os.files(path.join(dir, "*", "xmake.lua"))
@@ -409,7 +453,12 @@ function task.tasks()
             for _, filepath in ipairs(files) do
                 local results, errors = task._load(filepath)
                 if results then
-                    table.join2(tasks, results)
+                    for taskname, taskinfo in pairs(results) do
+                        if not task._is_conflicting(taskname, taskfiles[taskname], filepath) then
+                            taskfiles[taskname] = filepath
+                            tasks[taskname] = taskinfo
+                        end
+                    end
                 else
                     os.raise(errors)
                 end

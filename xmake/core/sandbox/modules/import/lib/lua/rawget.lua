@@ -1,0 +1,34 @@
+--!A cross-platform build utility based on Lua
+--
+-- Licensed under the Apache License, Version 2.0 (the "License");
+-- you may not use this file except in compliance with the License.
+-- You may obtain a copy of the License at
+--
+--     http://www.apache.org/licenses/LICENSE-2.0
+--
+-- Unless required by applicable law or agreed to in writing, software
+-- distributed under the License is distributed on an "AS IS" BASIS,
+-- WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+-- See the License for the specific language governing permissions and
+-- limitations under the License.
+--
+-- Copyright (C) 2015-present, Xmake Open Source Community.
+--
+-- @author      ruki
+-- @file        rawget.lua
+--
+
+-- the native lua `rawget`
+--
+-- it reads a field of a table without going through its `__index` metamethod, so it
+-- sees what the table itself holds and not what its metatable would answer
+--
+-- @note the same in lua 5.1 and 5.4
+--
+-- e.g.
+--
+-- import("lib.lua.rawget")
+--
+-- local value = rawget(tbl, "key")
+--
+return rawget

@@ -283,6 +283,14 @@ function _get_configs(package, configs, opt)
     if not package:use_external_includes() and (not policies or not policies:find("package.include_external_headers", 1, true)) then
         table.insert(policies_list, "package.include_external_headers:n")
     end
+    -- the sub-process must install its packages locally too, otherwise they go to the
+    -- global directory while we expect them under our build directory,
+    -- @see https://github.com/xmake-io/xmake/issues/7716
+    for _, policyname in ipairs({"package.install_locally", "package.host.install_locally"}) do
+        if project.policy(policyname) and (not policies or not policies:find(policyname, 1, true)) then
+            table.insert(policies_list, policyname)
+        end
+    end
     if policies and policies:find("package.build.ccache", 1, true) then
         table.insert(configs, "--ccachedir=" .. path.join(path.directory(package:cachedir()), "build_cache"))
         table.insert(policies_list, "build.ccache")
@@ -527,14 +535,19 @@ function install(package, configs, opt)
     -- get build environments
     local envs = opt.envs or buildenvs(package)
 
-    -- if the package is installed locally, pass the local packages directory
-    -- to the child xmake process so it can find already-installed deps
-    -- without re-installing them to the global directory
+    -- if the package is installed locally, pass our local packages directory to the
+    -- child xmake process, so the packages it installs locally land in the same place
+    -- and the deps we have already installed are found instead of installed again
+    --
+    -- @note we must not override `XMAKE_PKG_INSTALLDIR` here: it is the *global* root
+    -- of the child, and overriding it hides `~/.xmake/packages` from it, so the host
+    -- packages it needs (e.g. the toolchains) would be installed again under our
+    -- build directory, @see https://github.com/xmake-io/xmake/issues/7716
+    --
     -- @see https://github.com/xmake-io/xmake/discussions/7441
     if package:is_local() and not package:is_source_embed() then
         envs = table.clone(envs)
-        envs.XMAKE_PKG_INSTALLDIR = package_core.installdir({localdir = true})
-        envs.XMAKE_PKG_CACHEDIR   = package_core.cachedir({localdir = true})
+        envs.XMAKE_PKG_LOCALDIR = package_core.installdir({localdir = true})
     end
 
     -- pass local repositories

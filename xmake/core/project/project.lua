@@ -45,6 +45,8 @@ local option                = require("project/option")
 local policy                = require("project/policy")
 local project_package       = require("project/package")
 local deprecated_project    = require("project/deprecated/project")
+local addon                 = require("package/addon")
+local addons                = require("project/addons")
 local package               = require("package/package")
 local platform              = require("platform/platform")
 local toolchain             = require("tool/toolchain")
@@ -227,11 +229,131 @@ function project._api_add_toolchaindirs(interp, ...)
     end
 end
 
+-- install the addons which this project declares
+--
+-- @note we cannot install them here, we are loading the project, so we do it in a
+-- sub-process, @see xmake/modules/private/action/addon/impl/install_addons.lua
+--
+function project._install_addons(rootinfo)
+    -- @note we need to cache the result, the project may be loaded many times,
+    -- otherwise the failure would be ignored by the next load
+    local result = project._ADDONS_RESULT
+    if result == nil then
+        result = project._do_install_addons(rootinfo)
+        project._ADDONS_RESULT = result
+    end
+    return result
+end
+
+-- activate the addon versions which this project locks
+--
+-- @note an addon can be installed with several versions at the same time, the other
+-- projects may lock the other versions of it, @see core/package/addon.lua
+--
+function project._pin_addons()
+    for name, lockinfo in pairs(addons.locked() or {}) do
+        -- @note we can only pin an installed version, otherwise this addon would be
+        -- invisible and every reference to it would just say `not found`
+        --
+        -- the locked version is installed by the auto-fetch, @see addons.satisfied()
+        --
+        if lockinfo.version and table.contains(addon.versions(name), lockinfo.version) then
+            addon.pin(name, lockinfo.version)
+        end
+    end
+end
+
+-- do install the addons which this project declares
+-- install the addons which this project declares, e.g. add_addons("esp32-devel 1.0.x")
+--
+-- @return      the result, e.g. {ok = true, installed = true}, {ok = false, errors = ".."}
+--
+function project._do_install_addons(rootinfo)
+
+    -- this project declares nothing?
+    local requires = table.wrap(rootinfo:get("addons"))
+    if #requires == 0 then
+        return {ok = true}
+    end
+    local ok, errors = addons.validate(requires)
+    if not ok then
+        return {ok = false, errors = errors}
+    end
+
+    -- they have been installed already?
+    if addons.satisfied(requires) then
+        return {ok = true}
+    end
+
+    -- tell the user why we are installing something, it may need to confirm and download,
+    -- e.g. `xmake --help` in a project directory which declares some addons
+    utils.cprint("${color.warning}note: ${clear}this project needs the addons(${bright}%s${clear}), installing them ..",
+        table.concat(requires, ", "))
+    if baseoption.get("help") then
+        -- the help menu also shows the options which the addons provide, but the user
+        -- did not ask for an installation, so we tell them how to skip it
+        utils.cprint("${dim}we can run it outside of the project directory to skip the installation${clear}")
+    end
+
+    -- we pass the declarations to the installer, it must not load this project again,
+    -- @see xmake/modules/private/action/addon/impl/install_addons.lua
+    local datafile = os.tmpfile()
+    local ok, errors = io.save(datafile, {addons = requires, repositories = table.wrap(rootinfo:get("repositories"))})
+    if not ok then
+        return {ok = false, errors = errors}
+    end
+
+    -- @note we run it in a working directory which has no project, @see addon.workdir(),
+    -- otherwise it would load this project again
+    --
+    -- @note we may be called when building the option menu, the command line has not
+    -- been parsed yet, so we can only get the common flags from the raw arguments
+    --
+    local argv = {"lua"}
+    local flags = {["-y"] = "--yes", ["--yes"] = "--yes",
+                   ["-v"] = "--verbose", ["--verbose"] = "--verbose",
+                   ["-D"] = "--diagnosis", ["--diagnosis"] = "--diagnosis"}
+    local flags_added = {}
+    for _, arg in ipairs(xmake._COMMAND_ARGV or {}) do
+        local flag = flags[arg]
+        if flag and not flags_added[flag] then
+            table.insert(argv, flag)
+            flags_added[flag] = true
+        end
+    end
+    table.insert(argv, "private.action.addon.impl.install_addons")
+    table.insert(argv, os.projectdir())
+    table.insert(argv, datafile)
+    local exitcode, errors = os.execv(os.programfile(), argv, {curdir = addon.workdir()})
+    os.rm(datafile)
+    if exitcode ~= 0 then
+        return {ok = false, errors = errors or "install the addons of this project failed!"}
+    end
+
+    -- we have loaded the registry and its caches before installing them, so we need to reload it
+    addon.reload()
+    project._pin_addons()
+    rule.clear()
+    task.clear()
+    return {ok = true, installed = true}
+end
+
 -- load the project file
-function project._load(force, disable_filter)
+--
+-- @param opt   the options
+--              - force: load the project file again even if it has been loaded
+--              - disable_filter: disable the interpreter filter, e.g. `$(plat)`
+--              - skip_addons: do not install the addons which this project declares
+--              - addons_installed: the addons have been installed, we are loading it again
+--
+function project._load(opt)
+    opt = opt or {}
+
+    -- use the locked versions of the addons which this project declares
+    project._pin_addons()
 
     -- has already been loaded?
-    if project._memcache():get("rootinfo") and not force then
+    if project._memcache():get("rootinfo") and not opt.force then
         return true
     end
 
@@ -243,6 +365,12 @@ function project._load(force, disable_filter)
 
     -- get interpreter
     local interp = project.interpreter()
+
+    -- this project declares the addons which it needs, e.g. add_addons("esp32-devel"),
+    -- but we can only know them after loading it, so this pass must survive the references
+    -- of the addons which are not installed yet, and we load it again after installing them,
+    -- e.g. includes("@addon/esp32-devel/board")
+    interp:includes_unresolved_set(not opt.addons_installed)
 
     -- load script
     local ok, errors = interp:load(project.rootfile(), {on_load_data = function (data)
@@ -261,13 +389,30 @@ function project._load(force, disable_filter)
     end
 
     -- load the root info of the project
-    local rootinfo, errors = project._load_scope("root", true, not disable_filter)
+    local rootinfo, errors = project._load_scope("root", true, not opt.disable_filter)
     if not rootinfo then
         return false, errors
     end
 
+    -- install the addons which this project declares, and then load it again with them
+    --
+    -- @note we do not install them for the option menu, it merges the project tasks in a
+    -- best-effort way and every command builds it, @see project._load_tasks()
+    --
+    if not opt.skip_addons and not opt.addons_installed then
+        local result = project._install_addons(rootinfo)
+        if not result.ok then
+            os.cd(oldir)
+            return false, result.errors
+        end
+        if result.installed then
+            os.cd(oldir)
+            return project._load({force = true, disable_filter = opt.disable_filter, addons_installed = true})
+        end
+    end
+
     -- load the root info of the target
-    local rootinfo_target, errors = project._load_scope("root.target", true, not disable_filter)
+    local rootinfo_target, errors = project._load_scope("root.target", true, not opt.disable_filter)
     if not rootinfo_target then
         return false, errors
     end
@@ -311,6 +456,11 @@ function project._load_scope(scope_kind, deduplicate, enable_filter)
 end
 
 -- load tasks
+--
+-- @note we should not install the addons which this project declares here, the option menu
+-- merges the project tasks in a best-effort way and every command builds it,
+-- e.g. `xmake lua`, `xmake addon --remove --all`, @see xmake/core/main.lua
+--
 function project._load_tasks()
 
     -- the project file is not found?
@@ -319,7 +469,7 @@ function project._load_tasks()
     end
 
     -- load the project file first and disable filter
-    local ok, errors = project._load(true, true)
+    local ok, errors = project._load({force = true, disable_filter = true, skip_addons = true})
     if not ok then
         return nil, errors
     end
@@ -400,7 +550,7 @@ function project._load_targets()
 
     -- load all requires first and reload the project file to ensure has_package() works for targets
     local requires = project.required_packages()
-    local ok, errors = project._load(true)
+    local ok, errors = project._load({force = true})
     if not ok then
         return nil, errors
     end
@@ -481,7 +631,7 @@ function project._load_options(disable_filter)
     end
 
     -- reload the project file to ensure `if is_plat() then add_packagedirs() end` works
-    local ok, errors = project._load(true, disable_filter)
+    local ok, errors = project._load({force = true, disable_filter = disable_filter})
     if not ok then
         return nil, errors
     end
@@ -655,6 +805,9 @@ function project.apis()
         ,   "add_requires"
         ,   "add_requireconfs"
         ,   "add_repositories"
+            -- the addons which this project needs, they are installed automatically,
+            -- e.g. add_addons("esp32-devel 1.0.x"), @see core/project/addons.lua
+        ,   "add_addons"
         }
     ,   paths =
         {
@@ -706,6 +859,10 @@ function project.interpreter()
 
     -- set root scope
     interp:rootscope_set("target")
+
+    -- the project file can reference the includes files of the addons,
+    -- e.g. includes("@addon/esp32-devel/board")
+    interp:includes_resolver_add(addon.find_includes)
 
     -- define apis for rule
     interp:api_define(rule.apis())
@@ -1129,7 +1286,7 @@ function project.requires_str()
     if not requires_str then
 
         -- reload the project file to handle `has_config()`
-        local ok, errors = project._load(true)
+        local ok, errors = project._load({force = true})
         if not ok then
             os.raise(errors)
         end
@@ -1259,6 +1416,10 @@ end
 function project.toolchain(name, opt)
     opt = opt or {}
     local parseinfo = toolchain.parsename(name) -- we need to ignore `@packagename`
+    -- the addon toolchains are only loaded from the addons, e.g. set_toolchains("@addon/esp32/xtensa")
+    if parseinfo.addon_prefix then
+        return nil
+    end
     local toolchain_name = parseinfo.name
     local info = project._toolchains()[toolchain_name]
     if info == nil and opt.namespace then

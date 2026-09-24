@@ -208,3 +208,13 @@ function test_isexec(t)
 
     os.tryrm(tempdir)
 end
+
+function test_files_with_brackets(t)
+    local tmpdir = os.tmpfile() .. ".dir"
+    io.writefile(path.join(tmpdir, "a[1].lua"), "x")
+    io.writefile(path.join(tmpdir, "a1.lua"), "x")
+    -- a wildcard is required, a plain existing file is matched without converting the pattern
+    local files = os.files(path.join(tmpdir, "a[1]*.lua"))
+    t:are_equal(files, {path.join(tmpdir, "a[1].lua")})
+    os.tryrm(tmpdir)
+end

@@ -114,6 +114,35 @@ function json._pure_parse_str_val(str, pos, val)
     if not nextc then
         os.raise(early_end_error)
     end
+
+    -- decode the unicode escape, e.g. \uXXXX, a surrogate pair, e.g. \uD83D\uDE00, is combined
+    if nextc == 'u' then
+        local code = tonumber(str:sub(pos + 2, pos + 5):match('^%x%x%x%x$'), 16)
+        if not code then
+            os.raise("invalid unicode escape near position %d", pos)
+        end
+        if code >= 0xD800 and code <= 0xDBFF and str:sub(pos + 6, pos + 7) == '\\u' then
+            local low = tonumber(str:sub(pos + 8, pos + 11):match('^%x%x%x%x$'), 16)
+            if low and low >= 0xDC00 and low <= 0xDFFF then
+                code = 0x10000 + (code - 0xD800) * 0x400 + low - 0xDC00
+                pos = pos + 6
+            end
+        end
+        if code >= 0xD800 and code <= 0xDFFF then
+            os.raise("invalid unicode escape near position %d", pos)
+        end
+        local utf8char
+        if code < 0x80 then
+            utf8char = string.char(code)
+        elseif code < 0x800 then
+            utf8char = string.char(0xC0 + math.floor(code / 0x40), 0x80 + code % 0x40)
+        elseif code < 0x10000 then
+            utf8char = string.char(0xE0 + math.floor(code / 0x1000), 0x80 + math.floor(code / 0x40) % 0x40, 0x80 + code % 0x40)
+        else
+            utf8char = string.char(0xF0 + math.floor(code / 0x40000), 0x80 + math.floor(code / 0x1000) % 0x40, 0x80 + math.floor(code / 0x40) % 0x40, 0x80 + code % 0x40)
+        end
+        return json._pure_parse_str_val(str, pos + 6, val .. utf8char)
+    end
     return json._pure_parse_str_val(str, pos + 2, val .. (esc_map[nextc] or nextc))
 end
 

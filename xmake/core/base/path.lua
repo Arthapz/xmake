@@ -442,7 +442,7 @@ end
 function path.pattern(pattern)
 
     -- translate wildcards, e.g. *, **
-    pattern = pattern:gsub("([%+%.%-%^%$%(%)%%])", "%%%1")
+    pattern = pattern:gsub("([%+%.%-%^%$%(%)%%%[%]])", "%%%1")
     pattern = pattern:gsub("%*%*", "\001")
     pattern = pattern:gsub("%*", "\002")
     pattern = pattern:gsub("\001", ".*")
