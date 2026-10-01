@@ -20,67 +20,76 @@
 
 -- get architecture for vcpkg
 function arch(arch)
-    local archs = {
-        x86_64          = "x64",
-        i386            = "x86",
+	local archs = {
+		x86_64 = "x64",
+		i386 = "x86",
 
-        -- android: armeabi armeabi-v7a arm64-v8a x86 x86_64 mips mip64
-        -- Offers a doc: https://github.com/microsoft/vcpkg/tree/master/triplets
-        ["armeabi-v7a"] = "arm-neon",
-        ["arm64-v8a"]   = "arm64",
+		-- android: armeabi armeabi-v7a arm64-v8a x86 x86_64 mips mip64
+		-- Offers a doc: https://github.com/microsoft/vcpkg/tree/master/triplets
+		["armeabi-v7a"] = "arm-neon",
+		["arm64-v8a"] = "arm64",
 
-        -- ios: arm64 armv7 armv7s i386
-        armv7           = "arm",
-        armv7s          = "arm",
-        arm64           = "arm64",
-    }
-    return archs[arch] or arch
+		-- ios: arm64 armv7 armv7s i386
+		armv7 = "arm",
+		armv7s = "arm",
+		arm64 = "arm64",
+	}
+	return archs[arch] or arch
 end
 
 -- get platform for vcpkg
 function plat(plat)
-    local plats = {
-        macosx          = "osx",
-        iphoneos        = "ios",
-        bsd             = "freebsd",
-    }
-    return plats[plat] or plat
+	local plats = {
+		macosx = "osx",
+		iphoneos = "ios",
+		bsd = "freebsd",
+	}
+	return plats[plat] or plat
 end
 
 -- get triplet
 function triplet(configs, plat, arch)
-    configs = configs or {}
-    local triplet = arch .. "-" .. plat
-    if plat == "windows" and configs.shared ~= true then
-        triplet = triplet .. "-static"
-        if configs.runtimes and configs.runtimes:startswith("MD") then
-            triplet = triplet .. "-md"
-        end
-    elseif plat == "linux" then
-        -- x64-linux-dynamic
-        if arch == "x64" and configs.shared then
-            triplet = triplet .. "-dynamic"
-        end
-    elseif plat == "osx" then
-        -- x64-osx-dynamic
-        -- arm64-osx-dynamic
-        if (arch == "x64" or arch == "arm64") and configs.shared then
-            triplet = triplet .. "-dynamic"
-        end
-    elseif plat == "mingw" then
-        triplet = triplet .. (configs.shared ~= true and "-static" or "-dynamic")
-    end
-    return triplet
+	configs = configs or {}
+	local triplet = arch .. "-" .. plat
+	if plat == "windows" and configs.shared ~= true then
+		triplet = triplet .. "-static"
+		local runtimes = configs.runtimes
+		if runtimes then
+			runtimes = type(runtimes) == "string" and { runtimes } or runtimes
+			for _, runtime in ipairs(runtimes) do
+				if runtime:startswith("MD") then
+					triplet = triplet .. "-md"
+					break
+				end
+			end
+		end
+	elseif plat == "linux" then
+		-- x64-linux-dynamic
+		if arch == "x64" and configs.shared then
+			triplet = triplet .. "-dynamic"
+		end
+	elseif plat == "osx" then
+		-- x64-osx-dynamic
+		-- arm64-osx-dynamic
+		if (arch == "x64" or arch == "arm64") and configs.shared then
+			triplet = triplet .. "-dynamic"
+		end
+	elseif plat == "mingw" then
+		triplet = triplet .. (configs.shared ~= true and "-static" or "-dynamic")
+	end
+	return triplet
 end
 
 -- get configurations
 function main()
-    return {
-        baseline           = {description = "set the builtin baseline."},
-        features           = {description = "set the features of dependency."},
-        default_features   = {description = "enables or disables any defaults provided by the dependency.", default = true},
-        registries         = {description = "set the registries in vcpkg-configuration.json"},
-        default_registries = {description = "set the default registries in vcpkg-configuration.json"}
-    }
+	return {
+		baseline = { description = "set the builtin baseline." },
+		features = { description = "set the features of dependency." },
+		default_features = {
+			description = "enables or disables any defaults provided by the dependency.",
+			default = true,
+		},
+		registries = { description = "set the registries in vcpkg-configuration.json" },
+		default_registries = { description = "set the default registries in vcpkg-configuration.json" },
+	}
 end
-
